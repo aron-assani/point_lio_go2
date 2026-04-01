@@ -38,9 +38,10 @@ WORKDIR ${ROS_WS}
 
 # Clone unilidar_sdk2 repository
 RUN git clone https://github.com/unitreerobotics/unilidar_sdk2.git src/unilidar_sdk2
+RUN rm -rf src/unilidar_sdk2/unitree_lidar_ros
 
 # Clone point_lio_go2 repository
-RUN git clone https://${GITHUB_TOKEN}@github.com/aron-assani/point_lio.git src/point_lio
+RUN git clone https://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@github.com/aron-assani/point_lio_go2.git src/point_lio
 
 RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build"
 
