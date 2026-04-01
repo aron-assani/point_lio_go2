@@ -35,14 +35,14 @@ class Repuber(Node):
 
         # Load calibration data
         calib_data = calib_data = {
-                'acc_bias_x': 0.0,
-                'acc_bias_y': 0.0,
-                'acc_bias_z': 0.0,
-                'ang_bias_x': 0.0,
-                'ang_bias_y': 0.0,
-                'ang_bias_z': 0.0,
-                'ang_z2x_proj': 0.15,
-                'ang_z2y_proj': -0.28
+                'acc_bias_x': -0.824918,
+                'acc_bias_y': 1.82014,
+                'acc_bias_z': -0.278397,
+                'ang_bias_x': -0.00289323,
+                'ang_bias_y': 0.000271719,
+                'ang_bias_z': -0.000959372,
+                'ang_z2x_proj': 0.135082,
+                'ang_z2y_proj': -0.192149
             }
         try:
             home_path = os.path.expanduser('~')
