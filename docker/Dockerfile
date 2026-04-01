@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y \
     ros-humble-visualization-msgs \
     nano \
     ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-tf-transformations \
+    python3-transforms3d \
     && rm -rf /var/lib/apt/lists/*
 
 RUN cat <<EOF > /root/cyclonedds.xml

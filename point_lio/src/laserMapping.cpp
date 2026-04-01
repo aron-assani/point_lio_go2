@@ -760,6 +760,8 @@ int main(int argc, char **argv) {
     Eigen::Matrix<double, 24, 24> Q_input = process_noise_cov_input();
     Eigen::Matrix<double, 30, 30> Q_output = process_noise_cov_output();
     /*** debug record ***/
+    std::filesystem::create_directories(root_dir + "/Log");
+    std::filesystem::create_directories(root_dir + "/PCD");
     FILE *fp;
     string pos_log_dir = root_dir + "/Log/pos_log.txt";
     fp = fopen(pos_log_dir.c_str(), "w");
