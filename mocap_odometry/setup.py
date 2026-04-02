@@ -22,9 +22,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'mocap_node = mocap_odometry.mocap_node:main',
-            'publisher_node = mocap_odometry.publisher_node:main',
-            'transformer_node = mocap_odometry.transformer_node:main',
+            'log_node = mocap_odometry.log_node:main',
+            'publish_node = mocap_odometry.publish_node:main',
+            'transform_node = mocap_odometry.transform_node:main',
         ],
     },
 )

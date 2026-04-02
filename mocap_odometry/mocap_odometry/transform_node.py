@@ -29,6 +29,11 @@ class BodyTransformer(Node):
 
         self.path_msg = Path()
         self.path_msg.header.frame_id = self.fixed_frame
+
+    def odom_callback(self, msg: Odometry):
+        # 1. Extract sensor pose
+        pos_sensor = np.array([
+            msg.pose.pose.position.x,
             msg.pose.pose.position.y,
             msg.pose.pose.position.z
         ])
