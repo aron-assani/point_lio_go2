@@ -18,7 +18,10 @@ RUN apt-get update && apt-get install -y \
     ros-humble-rmw-cyclonedds-cpp \
     ros-humble-tf-transformations \
     python3-transforms3d \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install motioncapture scipy
 
 RUN cat <<EOF > /root/cyclonedds.xml
 <?xml version="1.0" encoding="UTF-8" ?>
