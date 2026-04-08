@@ -13,7 +13,7 @@ from geometry_msgs.msg import PoseStamped
 
 
 class TrajectoryEvaluator(Node):
-    def __init__(self, target_body_name=None):
+    def __init__(self, target_body_name='go2'):
         super().__init__('trajectory_evaluator_node')
 
         # --- CONFIGURATION ---
@@ -154,6 +154,13 @@ class TrajectoryEvaluator(Node):
         
         if not self.slam_ready:
             return
+        
+        # Get only the specified rigid body instead of looping through all of them
+        body = self.mocap.rigidBodies.get(self.target_body_name)
+        
+        # Guard clause in case the rigid body drops tracking for a split second
+        if body is None:
+            return
 
         t_mocap = self.get_clock().now().nanoseconds * 1e-9
         now_msg = self.get_clock().now().to_msg()
@@ -222,7 +229,7 @@ class TrajectoryEvaluator(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = TrajectoryEvaluator(target_body_name=None)
+    node = TrajectoryEvaluator(target_body_name='go2')
     
     # Use MultiThreadedExecutor to prevent MoCap blocking SLAM callbacks
     executor = MultiThreadedExecutor(num_threads=2)
