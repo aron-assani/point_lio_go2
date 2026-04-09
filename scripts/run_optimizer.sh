@@ -5,7 +5,7 @@ set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROSBAG_PATH="${1:?Error: Please provide rosbag path as argument}"
-CONFIG_PATH="${2:-/root/ros2_ws/src/point_lio/config/utlidar.yaml}"
+CONFIG_PATH="${2:-/root/ros2_ws/src/point_lio/point_lio/config/utlidar.yaml}"
 
 echo "=========================================="
 echo "Point-LIO Parameter Optimizer"

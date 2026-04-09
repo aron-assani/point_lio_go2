@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-rosbag2 \
     python3-transforms3d \
     python3-pip \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install motioncapture scipy pyyaml numpy
@@ -41,6 +42,9 @@ EOF
 
 RUN mkdir -p ${ROS_WS}/src
 WORKDIR ${ROS_WS}
+
+# Copy scripts early
+COPY scripts/ ${ROS_WS}/scripts/
 
 # Clone unilidar_sdk2 repository
 RUN git clone https://github.com/unitreerobotics/unilidar_sdk2.git src/unilidar_sdk2

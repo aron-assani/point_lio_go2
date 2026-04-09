@@ -54,7 +54,11 @@ class ParameterOptimizer:
         print(f"✓ Optimizer initialized. Optimizing {len(self.param_names)} parameters.")
         
     def cleanup_processes(self):
-        """Terminate all spawned processes."""
+        """Terminate all spawned processes and kill rviz windows."""
+        # Kill rviz windows explicitly
+        subprocess.run('pkill -9 rviz2', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.5)
+        
         for proc in self.processes:
             if proc.poll() is None:
                 proc.terminate()
@@ -147,7 +151,7 @@ class ParameterOptimizer:
         # Create temp config
         temp_config = self.create_temp_config(param_dict)
         
-        # Cleanup previous run
+        # Cleanup previous run (kill rviz and all processes)
         self.cleanup_processes()
         time.sleep(1)
         
@@ -158,28 +162,48 @@ class ParameterOptimizer:
         mocap_log.unlink(missing_ok=True)
         
         try:
+            # Start trajectory listener node first
+            print("  Starting trajectory listener...")
+            listener_proc = subprocess.Popen(
+                f'source /opt/ros/humble/setup.bash && '
+                f'source {self.workspace}/install/setup.bash && '
+                f'python3 {Path(__file__).parent}/trajectory_listener.py',
+                shell=True,
+                executable='/bin/bash',
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
+            )
+            self.processes.append(listener_proc)
+            time.sleep(2)
+            
             # Start rosbag playback
             print("  Starting rosbag playback...")
             bag_proc = subprocess.Popen(
+                f'source /opt/ros/humble/setup.bash && '
+                f'source {self.workspace}/install/setup.bash && '
                 f'ros2 bag play "{self.rosbag_path}" --loop',
                 shell=True,
+                executable='/bin/bash',
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
             )
             self.processes.append(bag_proc)
             time.sleep(2)
             
-            # Start point_lio with temp config
+            # Start point_lio with temp config (launches rviz)
             print("  Starting Point-LIO...")
             lio_proc = subprocess.Popen(
                 f'source /opt/ros/humble/setup.bash && '
                 f'source {self.workspace}/install/setup.bash && '
-                f'ros2 launch point_lio mapping_utlidar.launch '
+                f'timeout 120 ros2 launch point_lio mapping_utlidar.launch '
                 f'config_file:={temp_config}',
                 shell=True,
                 executable='/bin/bash',
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
             )
             self.processes.append(lio_proc)
             time.sleep(3)
@@ -189,11 +213,12 @@ class ParameterOptimizer:
             mocap_proc = subprocess.Popen(
                 f'source /opt/ros/humble/setup.bash && '
                 f'source {self.workspace}/install/setup.bash && '
-                f'ros2 run mocap_odometry trajectory_node',
+                f'timeout 120 ros2 run mocap_odometry trajectory_node',
                 shell=True,
                 executable='/bin/bash',
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
             )
             self.processes.append(mocap_proc)
             
@@ -201,17 +226,23 @@ class ParameterOptimizer:
             print("  Waiting for trajectory data...")
             start_wait = time.time()
             timeout = 120  # 2 minutes
+            trajectory_ready = False
             
             while time.time() - start_wait < timeout:
                 if slam_log.exists() and mocap_log.exists():
                     slam_size = slam_log.stat().st_size
                     mocap_size = mocap_log.stat().st_size
-                    if slam_size > 100 and mocap_size > 100:  # At least some data
-                        print(f"  Trajectories recorded ({slam_size} + {mocap_size} bytes)")
+                    # Need at least 2 lines of data (header + 1 entry)
+                    if slam_size > 100 and mocap_size > 100:
+                        print(f"  ✓ Trajectories recorded ({slam_size} + {mocap_size} bytes)")
+                        trajectory_ready = True
                         break
                 time.sleep(1)
-            else:
+            
+            if not trajectory_ready:
                 print(f"  ✗ Timeout waiting for trajectory files")
+                # Debug: check what topics are being published
+                subprocess.run('ros2 topic list', shell=True, executable='/bin/bash')
                 return float('inf')
             
             # Give extra time for final writes
@@ -228,6 +259,8 @@ class ParameterOptimizer:
                 
         except Exception as e:
             print(f"  ✗ Iteration error: {e}")
+            import traceback
+            traceback.print_exc()
             return float('inf')
         finally:
             self.cleanup_processes()
