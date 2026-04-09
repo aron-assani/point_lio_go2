@@ -164,6 +164,21 @@ class ParameterOptimizer:
         mocap_log.unlink(missing_ok=True)
         
         try:
+            # Start trajectory listener first (subscribes to ROS topics)
+            print("  Starting trajectory listener...")
+            listener_proc = subprocess.Popen(
+                f'source /opt/ros/humble/setup.bash && '
+                f'source {self.workspace}/install/setup.bash && '
+                f'python3 {Path(__file__).parent}/trajectory_listener.py',
+                shell=True,
+                executable='/bin/bash',
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
+            )
+            self.processes.append(listener_proc)
+            time.sleep(2)
+            
             # Start rosbag playback
             print("  Starting rosbag playback...")
             bag_proc = subprocess.Popen(
@@ -194,20 +209,6 @@ class ParameterOptimizer:
             )
             self.processes.append(lio_proc)
             time.sleep(3)
-            
-            # Start mocap odometry
-            print("  Starting mocap odometry...")
-            mocap_proc = subprocess.Popen(
-                f'source /opt/ros/humble/setup.bash && '
-                f'source {self.workspace}/install/setup.bash && '
-                f'timeout 120 ros2 run mocap_odometry trajectory_node',
-                shell=True,
-                executable='/bin/bash',
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid
-            )
-            self.processes.append(mocap_proc)
             
             # Wait for trajectories to be logged
             print("  Waiting for trajectory data...")
