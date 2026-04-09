@@ -73,19 +73,37 @@ python3 src/point_lio_go2/scripts/parameter_optimizer.py /path/to/rosbag.db3 /cu
 
 ## How It Works
 
-1. **Trajectory Listener** subscribes to:
-   - `/Odometry` - Point-LIO's pose estimates
-   - `/mocap_path` - Ground truth from mocap (recorded in rosbag)
+### Direct Trajectory Capture (No Hardware Dependency)
 
-2. **Rosbag playback** provides the sensor data and mocap truth
+1. **Trajectory Listener** node subscribes to:
+   - `/Odometry` - Point-LIO's raw sensor-frame pose estimates
+   - `/mocap_path` - Ground truth trajectory (recorded in rosbag)
 
-3. **Point-LIO** runs in real-time on the replayed sensor data
+2. **Sensor-to-Body Transform** - Applies the same transformation as `trajectory_node.py`:
+   - Takes raw LiDAR sensor position 
+   - Applies body-center offset: `[-0.2894, 0.0, 0.0468]`
+   - Transforms to body-center frame
+   - **Same result as RViz visualization**
+
+3. **Rosbag playback** provides the sensor data and mocap truth
 
 4. **Trajectories** are saved to text files as data arrives
 
 5. **ATE is computed** by comparing aligned trajectories
 
 6. **Optimizer** tests new parameters and selects best ones
+
+### Why This Approach?
+
+The original `trajectory_node.py` requires a **live OptiTrack hardware connection**. During rosbag playback:
+- It tries to connect to OptiTrack at startup
+- If no connection, the node fails (even though mocap data is in the rosbag)
+- This causes the SLAM trajectory to never be logged
+
+The new `trajectory_listener` is **hardware-independent**:
+- Subscribes to recorded messages from rosbag
+- Performs the same transformation locally
+- Works with pure rosbag playback, no hardware needed
 
 ### Optimizable Parameters
 
@@ -232,15 +250,40 @@ print(f"ATE: {ate} m")
 
 ### "Trajectory files are empty or too small"
 
-**Cause**: Nodes not running long enough or not publishing data.
+**Cause**: /Odometry topic not being published by Point-LIO, or not enough data.
 
 **Solutions**:
 - Ensure rosbag has sufficient data (30+ seconds recommended)
-- Verify Point-LIO is actually publishing: Check `/Odometry` topic in separate terminal
+- Verify Point-LIO is actually publishing: Check `/Odometry` topic in separate terminal:
+  ```bash
+  ros2 bag play your_rosbag.db3 --loop &
+  ros2 topic echo /Odometry
+  ```
 - Check rosbag contains all necessary topics:
   ```bash
   ros2 bag info your_rosbag.db3 | grep -E "Odometry|cloud|imu|mocap"
   ```
+- If `/Odometry` is published but files are still empty: Check trajectory_listener logs:
+  ```bash
+  ros2 run point_lio_go2 trajectory_listener  # Watch for subscription messages
+  ```
+
+### "SLAM trajectory file is empty but MoCap works fine"
+
+**Root Cause**: The original `trajectory_node.py` requires live OptiTrack hardware connection. During rosbag playback without hardware, it cannot initialize and doesn't log SLAM data.
+
+**Solution**: Use `trajectory_listener.py` instead, which:
+- Subscribes directly to `/Odometry` (raw sensor data from Point-LIO)
+- Performs sensor-to-body-center transformation locally
+- **Doesn't require OptiTrack hardware**
+- Works with pure rosbag playback
+
+The parameter optimizer automatically uses `trajectory_listener`, so this should work with rosbag data.
+
+**If still empty**:
+- Verify `/Odometry` topic exists in rosbag: `ros2 bag info your_rosbag.db3 | grep Odometry`
+- Run trajectory_listener manually to see subscription messages
+- Check Point-LIO is configured correctly in the rosbag
 
 ### "Point-LIO not publishing /Odometry"
 
