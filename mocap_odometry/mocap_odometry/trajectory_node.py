@@ -17,7 +17,7 @@ class TrajectoryEvaluator(Node):
         super().__init__('trajectory_evaluator_node')
 
         # --- CONFIGURATION ---
-        self.point_lio_odom_topic = '/state_estimation' 
+        self.point_lio_odom_topic = '/Odometry'  # Point-LIO publishes to /Odometry
         self.body_odom_topic = '/body_odom'
         self.body_path_topic = '/body_path'
         self.mocap_path_topic = '/mocap_path'
