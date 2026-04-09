@@ -147,6 +147,7 @@ class TrajectoryEvaluator(Node):
             ori = msg.pose.pose.orientation
             line = f"{t_slam:.6f} {pos_body[0]:.6f} {pos_body[1]:.6f} {pos_body[2]:.6f} {ori.x:.6f} {ori.y:.6f} {ori.z:.6f} {ori.w:.6f}\n"
             self.slam_file.write(line)
+            self.slam_file.flush()
 
     def mocap_timer_callback(self):
         # Blocking call - safe here due to MultiThreadedExecutor
@@ -210,6 +211,7 @@ class TrajectoryEvaluator(Node):
             if self.mocap_aligned:
                 line = f"{t_mocap:.6f} {pos_aligned[0]:.6f} {pos_aligned[1]:.6f} {pos_aligned[2]:.6f} {quat_aligned[0]:.6f} {quat_aligned[1]:.6f} {quat_aligned[2]:.6f} {quat_aligned[3]:.6f}\n"
                 self.mocap_file.write(line)
+                self.mocap_file.flush()
             
             break # Process only the targeted body
 

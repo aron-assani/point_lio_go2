@@ -20,12 +20,14 @@ from scipy.spatial.transform import Rotation as R
 
 
 class ParameterOptimizer:
-    def __init__(self, rosbag_path: str, config_path: str, workspace: str = '/root/ros2_ws'):
+    def __init__(self, rosbag_path: str, config_path: str, workspace: str = '/root/ros2_ws', error_threshold: float = None):
         self.rosbag_path = rosbag_path
         self.config_path = config_path
         self.workspace = workspace
         self.processes = []
         self.iteration = 0
+        self.best_ate = float('inf')
+        self.error_threshold = error_threshold  # Early termination if error exceeds this
         
         # Default parameter ranges and values 
         self.param_bounds = {
@@ -162,21 +164,6 @@ class ParameterOptimizer:
         mocap_log.unlink(missing_ok=True)
         
         try:
-            # Start trajectory listener node first
-            print("  Starting trajectory listener...")
-            listener_proc = subprocess.Popen(
-                f'source /opt/ros/humble/setup.bash && '
-                f'source {self.workspace}/install/setup.bash && '
-                f'python3 {Path(__file__).parent}/trajectory_listener.py',
-                shell=True,
-                executable='/bin/bash',
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid
-            )
-            self.processes.append(listener_proc)
-            time.sleep(2)
-            
             # Start rosbag playback
             print("  Starting rosbag playback...")
             bag_proc = subprocess.Popen(
@@ -225,15 +212,15 @@ class ParameterOptimizer:
             # Wait for trajectories to be logged
             print("  Waiting for trajectory data...")
             start_wait = time.time()
-            timeout = 120  # 2 minutes
+            timeout = 150  # 2.5 minutes - need time for 10s alignment + data recording
             trajectory_ready = False
             
             while time.time() - start_wait < timeout:
                 if slam_log.exists() and mocap_log.exists():
                     slam_size = slam_log.stat().st_size
                     mocap_size = mocap_log.stat().st_size
-                    # Need at least 2 lines of data (header + 1 entry)
-                    if slam_size > 100 and mocap_size > 100:
+                    # Need at least header + several data points (>500 bytes each file)
+                    if slam_size > 500 and mocap_size > 500:
                         print(f"  ✓ Trajectories recorded ({slam_size} + {mocap_size} bytes)")
                         trajectory_ready = True
                         break
@@ -252,6 +239,17 @@ class ParameterOptimizer:
             if slam_log.exists() and mocap_log.exists():
                 ate = self.compute_trajectory_error(str(slam_log), str(mocap_log))
                 print(f"  ✓ ATE (Absolute Trajectory Error): {ate:.6f} m")
+                
+                # Early termination: skip if error too large
+                if self.error_threshold is not None and ate > self.error_threshold:
+                    print(f"  ⚠ ATE exceeds threshold ({ate:.6f} > {self.error_threshold:.6f}), terminating iteration early")
+                    return float('inf')
+                
+                # Track best ATE
+                if ate < self.best_ate:
+                    self.best_ate = ate
+                    print(f"  ✨ New best ATE!")
+                
                 return ate
             else:
                 print(f"  ✗ Trajectory files not created")
@@ -333,12 +331,23 @@ class ParameterOptimizer:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: parameter_optimizer.py <rosbag_path> [config_path]")
-        print("Example: parameter_optimizer.py ~/rosbags/go2_data.db3")
+        print("Usage: parameter_optimizer.py <rosbag_path> [config_path] [--threshold ERROR_THRESHOLD]")
+        print("Example: parameter_optimizer.py ~/rosbags/go2_data.db3 utlidar.yaml --threshold 1.0")
         sys.exit(1)
     
     rosbag_path = sys.argv[1]
-    config_path = sys.argv[2] if len(sys.argv) > 2 else '/root/ros2_ws/src/point_lio/config/utlidar.yaml'
+    config_path = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else '/root/ros2_ws/src/point_lio/config/utlidar.yaml'
+    
+    # Parse error threshold
+    error_threshold = None
+    if '--threshold' in sys.argv:
+        threshold_idx = sys.argv.index('--threshold')
+        if threshold_idx + 1 < len(sys.argv):
+            try:
+                error_threshold = float(sys.argv[threshold_idx + 1])
+                print(f"✓ Early termination threshold set to {error_threshold} m")
+            except ValueError:
+                print(f"⚠ Invalid threshold value, ignoring")
     
     if not os.path.exists(rosbag_path):
         print(f"✗ Rosbag not found: {rosbag_path}")
@@ -348,7 +357,7 @@ def main():
         print(f"✗ Config not found: {config_path}")
         sys.exit(1)
     
-    optimizer = ParameterOptimizer(rosbag_path, config_path)
+    optimizer = ParameterOptimizer(rosbag_path, config_path, error_threshold=error_threshold)
     
     # Run optimization with Differential Evolution (global optimizer)
     best_params, best_ate = optimizer.optimize(method='differential_evolution', max_eval=50)
