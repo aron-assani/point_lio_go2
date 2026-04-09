@@ -43,9 +43,6 @@ EOF
 RUN mkdir -p ${ROS_WS}/src
 WORKDIR ${ROS_WS}
 
-# Copy scripts early
-COPY scripts/ ${ROS_WS}/scripts/
-
 # Clone unilidar_sdk2 repository
 RUN git clone https://github.com/unitreerobotics/unilidar_sdk2.git src/unilidar_sdk2
 RUN rm -rf src/unilidar_sdk2/unitree_lidar_ros
