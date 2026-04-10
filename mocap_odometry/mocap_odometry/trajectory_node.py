@@ -17,7 +17,7 @@ class TrajectoryEvaluator(Node):
         super().__init__('trajectory_evaluator_node')
 
         # --- CONFIGURATION ---
-        self.point_lio_odom_topic = '/Odometry'  # Point-LIO publishes to /Odometry
+        self.point_lio_odom_topic = '/Odometry'
         self.body_odom_topic = '/body_odom'
         self.body_path_topic = '/body_path'
         self.mocap_path_topic = '/mocap_path'
@@ -32,6 +32,7 @@ class TrajectoryEvaluator(Node):
         self.start_time = None
         self.slam_ready = False
         self.mocap_aligned = False
+        self.use_mocap = False
         
         self.slam_align_pos = None
         self.slam_align_rot = None
@@ -42,7 +43,7 @@ class TrajectoryEvaluator(Node):
         self.slam_file = None
         self.mocap_file = None
 
-        # Callbacks Groups (Prevents MoCap blocking SLAM)
+        # Callbacks Groups
         self.slam_cb_group = MutuallyExclusiveCallbackGroup()
         self.mocap_cb_group = MutuallyExclusiveCallbackGroup()
 
@@ -67,23 +68,28 @@ class TrajectoryEvaluator(Node):
         try:
             self.mocap = motioncapture.connect("optitrack", {'hostname': '192.168.2.141'})
             self.get_logger().info("Connected to OptiTrack. Waiting for first SLAM message...")
+            self.use_mocap = True
         except Exception as e:
-            self.get_logger().fatal(f"Failed to connect to OptiTrack: {e}")
-            sys.exit(1)
+            self.get_logger().warn(f"Failed to connect to OptiTrack: {e}. Running in SLAM-only mode.")
+            self.use_mocap = False
 
-        # MoCap Polling Timer (75Hz)
-        self.timer = self.create_timer(
-            1.0 / 75.0, 
-            self.mocap_timer_callback, 
-            callback_group=self.mocap_cb_group
-        )
+        # MoCap Polling Timer (75Hz) - Only initialize if MoCap is connected
+        if self.use_mocap:
+            self.timer = self.create_timer(
+                1.0 / 75.0, 
+                self.mocap_timer_callback, 
+                callback_group=self.mocap_cb_group
+            )
 
     def init_logging_files(self):
         log_dir = os.path.expanduser('~/ros2_ws')
         self.slam_file = open(os.path.join(log_dir, 'slam_trajectory.txt'), 'w')
-        self.mocap_file = open(os.path.join(log_dir, 'mocap_trajectory.txt'), 'w')
         self.slam_file.write("# timestamp x y z qx qy qz qw\n")
-        self.mocap_file.write("# timestamp x y z qx qy qz qw\n")
+        
+        if self.use_mocap:
+            self.mocap_file = open(os.path.join(log_dir, 'mocap_trajectory.txt'), 'w')
+            self.mocap_file.write("# timestamp x y z qx qy qz qw\n")
+            
         self.get_logger().info(f"Log files created in {log_dir}. Logging started.")
 
     def odom_callback(self, msg: Odometry):
@@ -139,10 +145,15 @@ class TrajectoryEvaluator(Node):
             self.slam_align_pos = pos_body
             self.slam_align_rot = rot_sensor
             self.slam_ready = True
-            self.get_logger().info("10 seconds elapsed. SLAM pose locked. Awaiting next MoCap frame for alignment...")
+            
+            if self.use_mocap:
+                self.get_logger().info("10 seconds elapsed. SLAM pose locked. Awaiting next MoCap frame for alignment...")
+            else:
+                self.init_logging_files()
+                self.get_logger().info("10 seconds elapsed. SLAM pose locked. Logging active in SLAM-only mode. Press Ctrl+C to stop.")
 
-        # 4. Log SLAM data if fully aligned
-        if self.mocap_aligned:
+        # 4. Log SLAM data if fully aligned (or if running without MoCap)
+        if self.mocap_aligned or (not self.use_mocap and self.slam_ready):
             t_slam = msg.header.stamp.sec + (msg.header.stamp.nanosec * 1e-9)
             ori = msg.pose.pose.orientation
             line = f"{t_slam:.6f} {pos_body[0]:.6f} {pos_body[1]:.6f} {pos_body[2]:.6f} {ori.x:.6f} {ori.y:.6f} {ori.z:.6f} {ori.w:.6f}\n"
@@ -156,10 +167,8 @@ class TrajectoryEvaluator(Node):
         if not self.slam_ready:
             return
         
-        # Get only the specified rigid body instead of looping through all of them
         body = self.mocap.rigidBodies.get(self.target_body_name)
         
-        # Guard clause in case the rigid body drops tracking for a split second
         if body is None:
             return
 
@@ -213,7 +222,7 @@ class TrajectoryEvaluator(Node):
                 self.mocap_file.write(line)
                 self.mocap_file.flush()
             
-            break # Process only the targeted body
+            break 
 
     def shutdown_routine(self):
         self.get_logger().info("Shutting down node... ensuring data is saved.")
@@ -223,7 +232,8 @@ class TrajectoryEvaluator(Node):
         if self.mocap_file and not self.mocap_file.closed:
             self.mocap_file.flush()
             self.mocap_file.close()
-        if self.mocap_aligned:
+            
+        if self.mocap_aligned or (not self.use_mocap and self.slam_ready):
             self.get_logger().info("Log files successfully saved and closed.")
         else:
             self.get_logger().info("Program exited before alignment. No log files were created.")
@@ -233,7 +243,6 @@ def main(args=None):
     rclpy.init(args=args)
     node = TrajectoryEvaluator(target_body_name='go2')
     
-    # Use MultiThreadedExecutor to prevent MoCap blocking SLAM callbacks
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
 
