@@ -1,21 +1,17 @@
 services:
-  optimizer:
-    container_name: point_lio_optimizer
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    volumes:
-      - ../tester_rosbag:/data/rosbag:ro
-      - ../optimization_results:/data/optimization_results:rw
-    environment:
-      - ROS_DOMAIN_ID=0
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      - TRIALS=50
-      - TARGET_ATE=0.5
-      - TIMEOUT=7200
+  point_lio:
+    container_name: point_lio_trial
+    build: 
+      context: .
+    network_mode: host
+    ipc: host
+    privileged: true
+    tty: true       
     stdin_open: true
-    tty: true
-    # Start interactive shell - run optimizer manually with:
-    # docker-compose exec optimizer bash
-    # Then inside: python3 /root/point_lio_go2/optimize_utlidar.py --help
-    command: bash
+    volumes:
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+    command: /bin/bash
