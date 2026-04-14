@@ -16,11 +16,7 @@ services:
     # Run the optimizer directly
     command: >
       bash -c "
-        source /opt/ros/humble/setup.bash &&
-        source /root/ros2_ws/install/setup.bash &&
-        python3 /root/point_lio_go2/optimize_utlidar.py 
-          --rosbag /data/rosbag 
-          --trials $${TRIALS:-50} 
-          --target-ate $${TARGET_ATE:-0.5} 
-          --output-dir /data/optimization_results
+      source /opt/ros/humble/setup.bash &&
+      source /root/ros2_ws/install/setup.bash &&
+      python3 /root/point_lio_go2/optimize_utlidar.py --rosbag /data/rosbag --trials $${TRIALS:-50} --target-ate $${TARGET_ATE:-0.5} --output-dir /data/optimization_results
       "

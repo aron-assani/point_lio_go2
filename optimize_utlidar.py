@@ -572,14 +572,14 @@ Examples:
 
     parser.add_argument(
         '--rosbag',
-        type=Path,
+        type=lambda x: Path(x),
         default=Path('tester_rosbag/rosbag2_2026_04_09-10_58_57'),
         help='Path to rosbag directory (default: tester_rosbag/rosbag2_2026_04_09-10_58_57)'
     )
 
     parser.add_argument(
         '--config',
-        type=Path,
+        type=lambda x: Path(x),
         default=Path('point_lio/config/utlidar.yaml'),
         help='Path to utlidar.yaml config file'
     )
@@ -614,7 +614,7 @@ Examples:
 
     parser.add_argument(
         '--output-dir',
-        type=Path,
+        type=lambda x: Path(x) if x else None,
         default=None,
         help='Directory to save optimization results'
     )
