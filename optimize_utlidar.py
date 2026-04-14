@@ -573,15 +573,15 @@ Examples:
     parser.add_argument(
         '--rosbag',
         type=lambda x: Path(x),
-        default=Path('tester_rosbag/rosbag2_2026_04_09-10_58_57'),
-        help='Path to rosbag directory (default: tester_rosbag/rosbag2_2026_04_09-10_58_57)'
+        default='/data/rosbag',
+        help='Path to rosbag directory (default: /data/rosbag when running in Docker)'
     )
 
     parser.add_argument(
         '--config',
         type=lambda x: Path(x),
-        default=Path('point_lio/config/utlidar.yaml'),
-        help='Path to utlidar.yaml config file'
+        default='point_lio/config/utlidar.yaml',
+        help='Path to utlidar.yaml config file (default: point_lio/config/utlidar.yaml)'
     )
 
     parser.add_argument(
@@ -620,6 +620,12 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    # Convert string defaults to Path objects
+    args.rosbag = Path(args.rosbag)
+    args.config = Path(args.config)
+    if args.output_dir:
+        args.output_dir = Path(args.output_dir)
 
     # Validate paths
     if not args.rosbag.exists():
