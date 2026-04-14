@@ -584,8 +584,8 @@ Examples:
 
     parser.add_argument(
         '--config',
-        default='point_lio/config/utlidar.yaml',
-        help='Path to utlidar.yaml config file (default: point_lio/config/utlidar.yaml)'
+        default='/root/ros2_ws/src/point_lio/point_lio/config/utlidar.yaml',
+        help='Path to utlidar.yaml config file (default: /root/ros2_ws/src/point_lio/point_lio/config/utlidar.yaml in Docker)'
     )
 
     parser.add_argument(
