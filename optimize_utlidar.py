@@ -310,6 +310,12 @@ class ParameterOptimizer:
         self.output_dir = Path(output_dir or self.rosbag_path.parent / 'optimization_results')
         self.output_dir.mkdir(exist_ok=True)
 
+        # Validate paths exist
+        if not self.rosbag_path.exists():
+            raise FileNotFoundError(f"❌ Rosbag not found: {self.rosbag_path}")
+        if not self.config_path.exists():
+            raise FileNotFoundError(f"❌ Config not found: {self.config_path}")
+
         self.config_manager = ConfigManager(self.config_path)
         self.best_ate = float('inf')
         self.best_params = None
@@ -618,26 +624,11 @@ Examples:
 
     args = parser.parse_args()
 
-    # Convert string defaults to Path objects
-    args.rosbag = Path(args.rosbag)
-    args.config = Path(args.config)
-    if args.output_dir:
-        args.output_dir = Path(args.output_dir)
-
-    # Validate paths
-    if not args.rosbag.exists():
-        print(f"❌ Rosbag not found: {args.rosbag}")
-        sys.exit(1)
-
-    if not args.config.exists():
-        print(f"❌ Config not found: {args.config}")
-        sys.exit(1)
-
     # Update global config
     OPTIMIZATION_CONFIG['target_ate_threshold'] = args.target_ate
     OPTIMIZATION_CONFIG['max_drift_threshold'] = args.max_drift
 
-    # Run optimization
+    # Run optimization (ParameterOptimizer converts strings to Path internally)
     optimizer = ParameterOptimizer(
         config_path=args.config,
         rosbag_path=args.rosbag,
