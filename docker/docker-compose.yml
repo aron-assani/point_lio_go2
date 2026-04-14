@@ -3,7 +3,7 @@ services:
     container_name: point_lio_optimizer
     build:
       context: ..
-      dockerfile: docker/Dockerfile.single
+      dockerfile: docker/Dockerfile
     volumes:
       - ../tester_rosbag:/data/rosbag:ro
       - ../optimization_results:/data/optimization_results:rw
