@@ -19,7 +19,7 @@ import yaml
 import subprocess
 import json
 import threading
-from pathlib import Path
+from pathlib import Path as FilePath
 from collections import deque
 from typing import Dict, Tuple, Any, Optional
 
@@ -233,7 +233,7 @@ def compute_ate(est_traj: list, gt_traj: list) -> Tuple[float, int]:
 class ConfigManager:
     """Manages yaml configuration file modifications."""
 
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: FilePath):
         self.config_path = config_path
         self.backup_path = config_path.with_suffix('.bak')
         self.original_config = self._load_config()
@@ -291,10 +291,10 @@ class ParameterOptimizer:
     """Bayesian optimization framework using Optuna."""
 
     def __init__(self,
-                 config_path: Path,
-                 rosbag_path: Path,
+                 config_path: FilePath,
+                 rosbag_path: FilePath,
                  param_bounds: Dict[str, Tuple[float, float]],
-                 output_dir: Path = None):
+                 output_dir: FilePath = None):
         """
         Initialize optimizer.
 
@@ -304,10 +304,10 @@ class ParameterOptimizer:
             param_bounds: Parameter bounds for optimization
             output_dir: Directory to save results
         """
-        self.config_path = Path(config_path)
-        self.rosbag_path = Path(rosbag_path)
+        self.config_path = FilePath(config_path)
+        self.rosbag_path = FilePath(rosbag_path)
         self.param_bounds = param_bounds
-        self.output_dir = Path(output_dir or self.rosbag_path.parent / 'optimization_results')
+        self.output_dir = FilePath(output_dir or self.rosbag_path.parent / 'optimization_results')
         self.output_dir.mkdir(exist_ok=True)
 
         # Validate paths exist
