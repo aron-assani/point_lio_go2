@@ -87,6 +87,7 @@ FIXED_PARAMS = {
 # Optimization settings
 OPTIMIZATION_CONFIG = {
     'target_ate_threshold': 0.5,      # Stop if ATE < 0.5 meters
+    'max_drift_threshold': 1.5,       # Stop iteration if current ATE exceeds this (meters)
     'patience': 5,                     # Early stopping: iterations without improvement
     'initial_trials': 20,              # Number of random trials before optimization
     'max_trials': 100,                 # Maximum optimization iterations
@@ -109,11 +110,11 @@ class TrajectoryCollector(Node):
         self.collection_lock = threading.Lock()
         self.collection_complete = threading.Event()
 
-        # Subscribe to Point-LIO odometry
-        self.odom_sub = self.create_subscription(
-            Odometry,
-            '/Odometry',
-            self.odom_callback,
+        # Subscribe to Point-LIO body-center path (from trajectory_node)
+        self.body_path_sub = self.create_subscription(
+            Path,
+            '/body_path',
+            self.body_path_callback,
             10
         )
 
@@ -127,24 +128,26 @@ class TrajectoryCollector(Node):
 
         self.get_logger().info("TrajectoryCollector initialized")
 
-    def odom_callback(self, msg: Odometry):
-        """Collect Point-LIO odometry poses."""
+    def body_path_callback(self, msg: Path):
+        """Collect Point-LIO body-center path poses."""
         with self.collection_lock:
-            pose = {
-                'timestamp': msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
-                'position': np.array([
-                    msg.pose.pose.position.x,
-                    msg.pose.pose.position.y,
-                    msg.pose.pose.position.z
-                ]),
-                'orientation': R.from_quat([
-                    msg.pose.pose.orientation.x,
-                    msg.pose.pose.orientation.y,
-                    msg.pose.pose.orientation.z,
-                    msg.pose.pose.orientation.w
-                ])
-            }
-            self.odometry_poses.append(pose)
+            self.odometry_poses.clear()
+            for pose_stamped in msg.poses:
+                pose = {
+                    'timestamp': pose_stamped.header.stamp.sec + pose_stamped.header.stamp.nanosec * 1e-9,
+                    'position': np.array([
+                        pose_stamped.pose.position.x,
+                        pose_stamped.pose.position.y,
+                        pose_stamped.pose.position.z
+                    ]),
+                    'orientation': R.from_quat([
+                        pose_stamped.pose.orientation.x,
+                        pose_stamped.pose.orientation.y,
+                        pose_stamped.pose.orientation.z,
+                        pose_stamped.pose.orientation.w
+                    ])
+                }
+                self.odometry_poses.append(pose)
 
     def mocap_callback(self, msg: Path):
         """Collect mocap ground truth poses."""
@@ -179,61 +182,21 @@ class TrajectoryCollector(Node):
             self.mocap_poses.clear()
 
 
-def align_trajectories(est_traj: list, gt_traj: list) -> Tuple[list, float]:
-    """
-    Align estimated trajectory to ground truth using first poses.
-
-    Args:
-        est_traj: Estimated trajectory [{'position': np.array, 'orientation': Rotation}, ...]
-        gt_traj: Ground truth trajectory
-
-    Returns:
-        Aligned trajectory, alignment scale
-    """
-    if len(est_traj) < 2 or len(gt_traj) < 2:
-        return [], 1.0
-
-    # Compute scale based on first meaningful displacement
-    est_disp = est_traj[-1]['position'] - est_traj[0]['position']
-    gt_disp = gt_traj[-1]['position'] - gt_traj[0]['position']
-
-    est_dist = np.linalg.norm(est_disp)
-    gt_dist = np.linalg.norm(gt_disp)
-
-    scale = gt_dist / est_dist if est_dist > 1e-6 else 1.0
-    scale = np.clip(scale, 0.5, 2.0)  # Prevent extreme scaling
-
-    # Align by rotation and translation using first/last poses
-    est_first = est_traj[0]['position']
-    gt_first = gt_traj[0]['position']
-
-    # Compute rotation alignment
-    est_rot = est_traj[-1]['orientation']
-    gt_rot = gt_traj[-1]['orientation']
-    rot_align = gt_rot * est_rot.inv()
-
-    # Apply alignment to all poses
-    aligned = []
-    for pose in est_traj:
-        aligned_pos = rot_align.apply(scale * pose['position']) + gt_first - rot_align.apply(scale * est_first)
-        aligned.append({
-            'timestamp': pose['timestamp'],
-            'position': aligned_pos,
-            'orientation': rot_align * pose['orientation']
-        })
-
-    return aligned, scale
+# Note: Post-hoc alignment removed. trajectory_node.py already applies frame alignment.
 
 
 def compute_ate(est_traj: list, gt_traj: list) -> Tuple[float, int]:
     """
     Compute Absolute Trajectory Error (ATE) between trajectories.
 
+    Uses trajectories as-is from trajectory_node (frame alignment already applied).
+    No post-hoc alignment.
+
     ATE = sqrt(mean(||p_i - p_i_gt||^2))
 
     Args:
-        est_traj: Estimated trajectory
-        gt_traj: Ground truth trajectory
+        est_traj: Estimated trajectory (from /body_path)
+        gt_traj: Ground truth trajectory (from /mocap_path, already frame-aligned)
 
     Returns:
         ATE error, number of aligned poses
@@ -241,15 +204,12 @@ def compute_ate(est_traj: list, gt_traj: list) -> Tuple[float, int]:
     if len(est_traj) < 2 or len(gt_traj) < 2:
         return float('inf'), 0
 
-    # Align trajectories
-    aligned_traj, _ = align_trajectories(est_traj, gt_traj)
-
-    # Compute ATE by temporal alignment
+    # Compute ATE by temporal alignment (no post-hoc alignment)
     errors = []
     aligned_count = 0
 
     g_idx = 0
-    for e_pose in aligned_traj:
+    for e_pose in est_traj:
         # Find nearest gt pose by timestamp
         while g_idx < len(gt_traj) - 1 and \
               abs(gt_traj[g_idx + 1]['timestamp'] - e_pose['timestamp']) < \
@@ -408,26 +368,36 @@ class ParameterOptimizer:
         Run Point-LIO with rosbag and collect trajectory.
 
         This function:
-        1. Launches ros2 bag play
-        2. Launches point_lio node
-        3. Collects odometry and mocap trajectories
-        4. Computes ATE
+        1. Launches point_lio mapping_utlidar.launch
+        2. Launches trajectory_node (mocap connection & alignment)
+        3. Launches rosbag playback
+        4. Collects body_path and mocap trajectories
+        5. Computes ATE
         """
         try:
             # Initialize ROS
             rclpy.init(args=None)
             collector = TrajectoryCollector()
 
-            # Run rosbag in background
-            rosbag_proc = subprocess.Popen(
-                ['ros2', 'bag', 'play', str(self.rosbag_path), '-l'],
+            # Step 1: Launch Point-LIO
+            pointlio_proc = subprocess.Popen(
+                ['ros2', 'launch', 'point_lio', 'mapping_utlidar.launch', 'rviz:=false'],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
+            time.sleep(2)
 
-            # Launch Point-LIO
-            pointlio_proc = subprocess.Popen(
-                ['ros2', 'launch', 'point_lio', 'mapping_utlidar.launch', 'rviz:=false'],
+            # Step 2: Launch trajectory_node (requires OptiTrack connection)
+            trajectory_proc = subprocess.Popen(
+                ['ros2', 'run', 'mocap_odometry', 'trajectory_node'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            time.sleep(2)
+
+            # Step 3: Run rosbag in background
+            rosbag_proc = subprocess.Popen(
+                ['ros2', 'bag', 'play', str(self.rosbag_path), '-l'],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
@@ -435,6 +405,8 @@ class ParameterOptimizer:
             # Collect trajectories for specified timeout
             timeout_start = time.time()
             min_poses = 50
+            drift_check_counter = 0
+            early_termination = False
 
             while (time.time() - timeout_start) < OPTIMIZATION_CONFIG['trajectory_collection_timeout']:
                 est_traj, gt_traj = collector.get_trajectories()
@@ -442,6 +414,18 @@ class ParameterOptimizer:
                 # Check if we have enough poses
                 if len(est_traj) >= min_poses and len(gt_traj) >= min_poses:
                     break
+
+                # Monitor drift every 10 iterations
+                drift_check_counter += 1
+                if drift_check_counter >= 10 and len(est_traj) >= 20 and len(gt_traj) >= 20:
+                    drift_check_counter = 0
+                    current_ate, _ = compute_ate(est_traj, gt_traj)
+                    
+                    # Early termination if drift exceeds threshold
+                    if current_ate > OPTIMIZATION_CONFIG['max_drift_threshold']:
+                        print(f"⚠️  Current ATE ({current_ate:.3f}m) exceeds drift threshold ({OPTIMIZATION_CONFIG['max_drift_threshold']:.3f}m). Terminating early.")
+                        early_termination = True
+                        break
 
                 # Spin ROS for short duration to collect messages
                 rclpy.spin_once(collector, timeout_sec=0.1)
@@ -457,14 +441,20 @@ class ParameterOptimizer:
 
             # Cleanup
             pointlio_proc.terminate()
+            trajectory_proc.terminate()
             rosbag_proc.terminate()
             time.sleep(1)
             pointlio_proc.kill()
+            trajectory_proc.kill()
             rosbag_proc.kill()
 
             collector.destroy_node()
             rclpy.shutdown()
 
+            # Return infinity if terminated early due to excessive drift
+            if early_termination:
+                return float('inf'), aligned_count
+            
             return ate, aligned_count
 
         except Exception as e:
@@ -616,6 +606,13 @@ Examples:
     )
 
     parser.add_argument(
+        '--max-drift',
+        type=float,
+        default=OPTIMIZATION_CONFIG['max_drift_threshold'],
+        help=f"Max drift threshold - terminate iteration if ATE exceeds this (default: {OPTIMIZATION_CONFIG['max_drift_threshold']})"
+    )
+
+    parser.add_argument(
         '--output-dir',
         type=Path,
         default=None,
@@ -635,6 +632,7 @@ Examples:
 
     # Update global config
     OPTIMIZATION_CONFIG['target_ate_threshold'] = args.target_ate
+    OPTIMIZATION_CONFIG['max_drift_threshold'] = args.max_drift
 
     # Run optimization
     optimizer = ParameterOptimizer(
