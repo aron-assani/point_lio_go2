@@ -6,9 +6,6 @@ ENV ROS_WS=/root/ros2_ws
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 ENV CYCLONEDDS_URI=file:///root/cyclonedds.xml
 
-# ============================================================================
-# Base Point-LIO dependencies
-# ============================================================================
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
@@ -22,12 +19,14 @@ RUN apt-get update && apt-get install -y \
     ros-humble-tf-transformations \
     ros-humble-rosbag2 \
     python3-transforms3d \
+    python3-scipy \
+    python3-tk \
     python3-pip \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Point-LIO Python dependencies
-RUN pip3 install motioncapture scipy pyyaml numpy
+RUN pip3 install motioncapture scipy pyyaml numpy optuna matplotlib tabulate
 
 # CycloneDDS configuration
 RUN cat <<EOF > /root/cyclonedds.xml
@@ -56,28 +55,6 @@ RUN rm -rf src/unilidar_sdk2/unitree_lidar_ros
 RUN git clone https://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@github.com/aron-assani/point_lio_go2.git src/point_lio
 
 RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build"
-
-# ============================================================================
-# Parameter Optimizer dependencies
-# ============================================================================
-RUN apt-get update && apt-get install -y \
-    python3-scipy \
-    python3-tk \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir \
-    optuna \
-    matplotlib \
-    tabulate
-
-# Copy optimization scripts from parent directory
-COPY optimize_utlidar.py /root/point_lio_go2/
-COPY analyze_optimization.py /root/point_lio_go2/
-COPY compare_trajectories.py /root/point_lio_go2/
-COPY entrypoint_optimize.sh /root/point_lio_go2/
-COPY mocap_odometry /root/point_lio_go2/mocap_odometry
-
-RUN chmod +x /root/point_lio_go2/entrypoint_optimize.sh
 
 # Environment setup
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \

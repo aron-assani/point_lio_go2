@@ -52,8 +52,8 @@ log_warning() {
 print_header() {
     echo ""
     echo "╔══════════════════════════════════════════════════════════════════╗"
-    echo "║  Point-LIO Parameter Optimization Framework (Docker)            ║"
-    echo "║  $1"
+    echo "║  Point-LIO Parameter Optimization Framework (Docker)             ║"
+    echo "║  $1                                                              ║"
     echo "╚══════════════════════════════════════════════════════════════════╝"
     echo ""
 }

@@ -294,7 +294,8 @@ class ParameterOptimizer:
                  config_path: FilePath,
                  rosbag_path: FilePath,
                  param_bounds: Dict[str, Tuple[float, float]],
-                 output_dir: FilePath = None):
+                 output_dir: FilePath = None,
+                 enable_rviz: bool = False):
         """
         Initialize optimizer.
 
@@ -303,12 +304,14 @@ class ParameterOptimizer:
             rosbag_path: Path to rosbag directory
             param_bounds: Parameter bounds for optimization
             output_dir: Directory to save results
+            enable_rviz: Whether to enable RViz visualization
         """
         self.config_path = FilePath(config_path)
         self.rosbag_path = FilePath(rosbag_path)
         self.param_bounds = param_bounds
         self.output_dir = FilePath(output_dir or self.rosbag_path.parent / 'optimization_results')
         self.output_dir.mkdir(exist_ok=True)
+        self.enable_rviz = enable_rviz
 
         # Validate paths exist
         if not self.rosbag_path.exists():
@@ -321,6 +324,7 @@ class ParameterOptimizer:
         self.best_params = None
         self.trial_results = []
         self.consecutive_no_improve = 0
+        self.rviz_proc = None  # Track RViz process for cleanup
 
     def run_trial(self, params: Dict[str, float]) -> Tuple[float, int]:
         """
@@ -369,6 +373,24 @@ class ParameterOptimizer:
 
         return ate, aligned_count
 
+    def _kill_rviz_if_exists(self):
+        """Kill any existing RViz windows from previous iterations."""
+        if self.rviz_proc is not None:
+            try:
+                self.rviz_proc.terminate()
+                time.sleep(0.5)
+                if self.rviz_proc.poll() is None:
+                    self.rviz_proc.kill()
+                self.rviz_proc = None
+            except Exception as e:
+                print(f"⚠️  Error terminating RViz: {e}")
+        
+        # Also kill any orphaned rviz processes
+        try:
+            subprocess.run(['pkill', '-f', 'rviz2'], timeout=2)
+        except Exception:
+            pass
+
     def _run_ros_system(self) -> Tuple[float, int]:
         """
         Run Point-LIO with rosbag and collect trajectory.
@@ -381,16 +403,28 @@ class ParameterOptimizer:
         5. Computes ATE
         """
         try:
+            # Kill any previous RViz windows
+            if self.enable_rviz:
+                self._kill_rviz_if_exists()
+
             # Initialize ROS
             rclpy.init(args=None)
             collector = TrajectoryCollector()
 
+            # Build rviz argument
+            rviz_arg = 'rviz:=true' if self.enable_rviz else 'rviz:=false'
+            
             # Step 1: Launch Point-LIO
             pointlio_proc = subprocess.Popen(
-                ['ros2', 'launch', 'point_lio', 'mapping_utlidar.launch', 'rviz:=false'],
+                ['ros2', 'launch', 'point_lio', 'mapping_utlidar.launch', rviz_arg],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
+            
+            # If RViz is enabled, track the process for cleanup
+            if self.enable_rviz:
+                self.rviz_proc = pointlio_proc
+            
             time.sleep(2)
 
             # Step 2: Launch trajectory_node (requires OptiTrack connection)
@@ -453,6 +487,10 @@ class ParameterOptimizer:
             pointlio_proc.kill()
             trajectory_proc.kill()
             rosbag_proc.kill()
+            
+            # Kill any remaining RViz windows
+            if self.enable_rviz:
+                self._kill_rviz_if_exists()
 
             collector.destroy_node()
             rclpy.shutdown()
@@ -542,17 +580,25 @@ class ParameterOptimizer:
         print(f"\n{'='*70}")
         print(f"📈 Optimization Complete!")
         print(f"{'='*70}")
-        print(f"Best ATE: {self.best_ate:.4f}m")
-        print(f"Best parameters:")
-        for param, value in self.best_params.items():
-            print(f"  - {param}: {value:.6f}")
-        print(f"Total trials: {len(self.trial_results)}")
-        print(f"Results saved to: {self.output_dir}")
+        
+        if self.best_params is None:
+            print("⚠️  No successful trials completed!")
+            print("All trials failed or returned infinity (ATE exceeds max_drift threshold).")
+            print(f"Total trials: {len(self.trial_results)}")
+            print(f"Please check rosbag file and ROS configuration.")
+        else:
+            print(f"Best ATE: {self.best_ate:.4f}m")
+            print(f"Best parameters:")
+            for param, value in self.best_params.items():
+                print(f"  - {param}: {value:.6f}")
+            print(f"Total trials: {len(self.trial_results)}")
+            print(f"Results saved to: {self.output_dir}")
+            
+            # Save best config
+            self.config_manager.update_parameters(self.best_params)
+            print(f"✓ Best configuration saved to: {self.config_path}")
+        
         print(f"{'='*70}\n")
-
-        # Save best config
-        self.config_manager.update_parameters(self.best_params)
-        print(f"✓ Best configuration saved to: {self.config_path}")
 
 
 # ============================================================================
@@ -622,6 +668,12 @@ Examples:
         help='Directory to save optimization results'
     )
 
+    parser.add_argument(
+        '--enable-rviz',
+        action='store_true',
+        help='Enable RViz visualization for debugging (will be killed between iterations)'
+    )
+
     args = parser.parse_args()
 
     # Update global config
@@ -633,7 +685,8 @@ Examples:
         config_path=args.config,
         rosbag_path=args.rosbag,
         param_bounds=PARAM_BOUNDS,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        enable_rviz=args.enable_rviz
     )
 
     optimizer.optimize(n_trials=args.trials, timeout=args.timeout)
