@@ -17,7 +17,7 @@ class TrajectoryEvaluator(Node):
         super().__init__('trajectory_evaluator_node')
 
         # --- CONFIGURATION ---
-        self.point_lio_odom_topic = '/Odometry'
+        self.point_lio_odom_topic = '/state_estimation'
         self.body_odom_topic = '/body_odom'
         self.body_path_topic = '/body_path'
         self.mocap_path_topic = '/mocap_path'
@@ -68,7 +68,7 @@ class TrajectoryEvaluator(Node):
         try:
             self.mocap = motioncapture.connect("optitrack", {'hostname': '192.168.2.141'})
             self.get_logger().info("Connected to OptiTrack. Waiting for first SLAM message...")
-            self.use_mocap = True
+            self.use_mocap = False
         except Exception as e:
             self.get_logger().warn(f"Failed to connect to OptiTrack: {e}. Running in SLAM-only mode.")
             self.use_mocap = False
@@ -141,7 +141,7 @@ class TrajectoryEvaluator(Node):
 
         # 3. Handle 10-second alignment threshold
         elapsed = current_ros_time - self.start_time
-        if elapsed >= 10.0 and not self.slam_ready:
+        if elapsed >= 3.0 and not self.slam_ready:
             self.slam_align_pos = pos_body
             self.slam_align_rot = rot_sensor
             self.slam_ready = True
