@@ -1,11 +1,11 @@
-version: '3.8'
-
 services:
   # Base Point-LIO service (runs mapping and trajectory)
   point_lio_system:
+    container_name: point_lio_system
     build:
       context: .
       dockerfile: Dockerfile
+    image: point_lio:latest
     volumes:
       - ./tester_rosbag:/data/rosbag:ro
       - ./optimization_results:/data/optimization_results:rw
@@ -23,9 +23,12 @@ services:
 
   # Optimizer service (runs parameter optimization)
   optimizer:
+    container_name: point_lio_optimizer
     build:
       context: .
       dockerfile: Dockerfile.optimize
+      args:
+        BASE_IMAGE: point_lio:latest
     volumes:
       - ./tester_rosbag:/data/rosbag:ro
       - ./optimization_results:/data/optimization_results:rw

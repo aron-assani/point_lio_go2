@@ -7,7 +7,8 @@
 #   docker build -f Dockerfile.optimize -t point_lio_optimizer .
 #   docker run -it -v /path/to/data:/data point_lio_optimizer --trials 50
 
-FROM point_lio:latest
+ARG BASE_IMAGE=point_lio:latest
+FROM ${BASE_IMAGE}
 
 # Install Python optimization dependencies
 RUN apt-get update && apt-get install -y \
