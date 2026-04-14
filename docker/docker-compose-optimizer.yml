@@ -25,8 +25,8 @@ services:
   optimizer:
     container_name: point_lio_optimizer
     build:
-      context: .
-      dockerfile: Dockerfile.optimize
+      context: ..
+      dockerfile: docker/Dockerfile.optimize
       args:
         BASE_IMAGE: point_lio:latest
     volumes:
