@@ -572,14 +572,12 @@ Examples:
 
     parser.add_argument(
         '--rosbag',
-        type=lambda x: Path(x),
         default='/data/rosbag',
         help='Path to rosbag directory (default: /data/rosbag when running in Docker)'
     )
 
     parser.add_argument(
         '--config',
-        type=lambda x: Path(x),
         default='point_lio/config/utlidar.yaml',
         help='Path to utlidar.yaml config file (default: point_lio/config/utlidar.yaml)'
     )
@@ -614,7 +612,6 @@ Examples:
 
     parser.add_argument(
         '--output-dir',
-        type=lambda x: Path(x) if x else None,
         default=None,
         help='Directory to save optimization results'
     )
