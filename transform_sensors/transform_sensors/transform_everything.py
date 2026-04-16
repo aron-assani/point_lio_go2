@@ -142,6 +142,11 @@ class Repuber(Node):
         elevated_cloud.is_dense = data.is_dense
 
         self.cloud_pub.publish(elevated_cloud)
+
+    def ensure_time_stamp_offset(self, stamp):
+        if not self.time_stamp_offset_set:
+            self.time_stamp_offset = self.get_clock().now().nanoseconds - Time.from_msg(stamp).nanoseconds
+            self.time_stamp_offset_set = True
             
     def transform_vector(self, vector, rotation):
         # Transform a vector using a given quaternion rotation
@@ -159,6 +164,9 @@ class Repuber(Node):
 
 
     def imu_callback(self, data):    
+        if not self.time_stamp_offset_set:
+            self.ensure_time_stamp_offset(data.header.stamp)
+
         trans = np.zeros(3)
         trans[0] = self.body2imu_trans.transform.translation.x
         trans[1] = self.body2imu_trans.transform.translation.y

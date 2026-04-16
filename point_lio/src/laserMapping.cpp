@@ -204,14 +204,19 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     double preprocess_start_time = omp_get_wtime();
     if (get_time_sec(msg->header.stamp) < last_timestamp_lidar) {
         RCLCPP_ERROR(logger, "lidar loop back, clear buffer");
-        // lidar_buffer.shrink_to_fit();
+        lidar_buffer.clear();
+        time_buffer.clear();
+        ptr_con->clear();
+        frame_ct = 0;
+        lidar_pushed = false;
+        last_timestamp_lidar = get_time_sec(msg->header.stamp);
 
         mtx_buffer.unlock();
         sig_buffer.notify_all();
         return;
     }
 
-    last_timestamp_lidar = msg->header.stamp.sec;
+    last_timestamp_lidar = get_time_sec(msg->header.stamp);
 
     PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
     PointCloudXYZI::Ptr ptr_div(new PointCloudXYZI());
@@ -347,7 +352,8 @@ void imu_cbk(const sensor_msgs::msg::Imu::SharedPtr msg_in) {
 
     if (timestamp < last_timestamp_imu) {
         RCLCPP_ERROR(logger, "imu loop back, clear deque");
-        // imu_deque.shrink_to_fit();
+        imu_deque.clear();
+        last_timestamp_imu = timestamp;
         mtx_buffer.unlock();
         sig_buffer.notify_all();
         return;
