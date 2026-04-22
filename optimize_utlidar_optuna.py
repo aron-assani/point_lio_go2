@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SLAM Trajectory Optimizer for UTLIDAR Configuration
+SLAM Trajectory Optimizer for UTLIDAR Configuration (Optuna version)
 Starts the mapping_utlidar_optimize.launch and monitors trajectory topics.
 """
 
@@ -12,21 +12,19 @@ import os
 import signal
 import json
 import re
-import random
 from pathlib import Path as FSPath
 
-import numpy as np
-
+import optuna
 import rclpy
-from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
 from nav_msgs.msg import Path as PathMsg
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
 
 
 UTLIDAR_INSTALL_CONFIG_PATH = FSPath('/root/ros2_ws/install/point_lio/share/point_lio/config/utlidar.yaml')
 UTLIDAR_SOURCE_CONFIG_PATH = FSPath(__file__).resolve().parent / 'point_lio' / 'config' / 'utlidar.yaml'
 UTLIDAR_CONFIG_PATH = UTLIDAR_INSTALL_CONFIG_PATH if UTLIDAR_INSTALL_CONFIG_PATH.exists() else UTLIDAR_SOURCE_CONFIG_PATH
-# Parameter search space for Bayesian optimization.
+
 PARAMETER_BOUNDS = {
     'lidar_meas_cov': (0.001, 0.05),
     'acc_cov_output': (50.0, 2000.0),
@@ -51,12 +49,24 @@ INITIAL_PARAMETER_VALUES = {
     'acc_cov_input': 2.0,
 }
 
-RANDOM_INIT_ITERATIONS = 4
-EI_CANDIDATE_COUNT = 512
-GP_LENGTH_SCALE = 0.35
-GP_SIGNAL_VARIANCE = 1.0
-GP_NOISE = 1e-6
 EARLY_EXIT_PENALTY_COST = 1e9
+OPTUNA_STORAGE_PATH = FSPath('optuna_utlidar_study.db')
+
+# Multi-term objective: accuracy + smoothness + stability.
+OBJECTIVE_MODE = 'accuracy_smoothness_stability'
+OBJECTIVE_TAIL_FRACTION = 0.25
+OBJECTIVE_BOUNDS = {
+    'time_in_bound_threshold_m': 0.25,
+    'slope_deadband': 0.0,
+}
+OBJECTIVE_WEIGHTS = {
+    'accuracy_mean': 0.45,
+    'accuracy_p95': 0.25,
+    'jitter_accel': 0.20,
+    'stability_positive_slope': 0.05,
+    'stability_out_of_bound_ratio': 0.05,
+}
+OPTUNA_STUDY_NAME = f'utlidar_optimization_{OBJECTIVE_MODE}_v4'
 
 
 class TrajectoryMonitor(Node):
@@ -92,7 +102,7 @@ class TrajectoryMonitor(Node):
         self.get_logger().error(reason)
         if self.on_failure is not None:
             self.on_failure(reason)
-    
+
     def mocap_path_callback(self, msg: PathMsg):
         self.mocap_path_count += 1
         self.last_mocap_msg_time = self.get_clock().now()
@@ -101,7 +111,7 @@ class TrajectoryMonitor(Node):
             p = msg.poses[-1].pose.position
             self.latest_mocap_position = (p.x, p.y, p.z)
         self.get_logger().debug(f'Mocap path message #{self.mocap_path_count}: {len(msg.poses)} poses')
-    
+
     def body_path_callback(self, msg: PathMsg):
         self.body_path_count += 1
         self.last_body_msg_time = self.get_clock().now()
@@ -118,8 +128,11 @@ class TrajectoryMonitor(Node):
         self.drift_samples.append(self.latest_path_drift)
         self.consecutive_drift_violations = self.consecutive_drift_violations + 1 if self.latest_path_drift > self.drift_threshold_m else 0
         if self.consecutive_drift_violations >= self.max_consecutive_violations:
-            self._handle_failure(f'Path drift exceeded threshold: {self.latest_path_drift:.3f} m > {self.drift_threshold_m:.3f} m for {self.consecutive_drift_violations} checks.')
-    
+            self._handle_failure(
+                f'Path drift exceeded threshold: {self.latest_path_drift:.3f} m > '
+                f'{self.drift_threshold_m:.3f} m for {self.consecutive_drift_violations} checks.'
+            )
+
     def print_stats(self):
         drift_text = 'N/A' if self.latest_path_drift is None else f'{self.latest_path_drift:.3f} m'
         self.get_logger().info(
@@ -205,88 +218,6 @@ def clamp_parameter_value(key, value):
     return float(min(max(value, lo), hi))
 
 
-def config_to_vector(config):
-    keys = list(PARAMETER_BOUNDS.keys())
-    return np.array([config[k] for k in keys], dtype=float)
-
-
-def normalize_vector(vec):
-    mins = np.array([PARAMETER_BOUNDS[k][0] for k in PARAMETER_BOUNDS], dtype=float)
-    maxs = np.array([PARAMETER_BOUNDS[k][1] for k in PARAMETER_BOUNDS], dtype=float)
-    return (vec - mins) / (maxs - mins)
-
-
-def denormalize_vector(vec):
-    mins = np.array([PARAMETER_BOUNDS[k][0] for k in PARAMETER_BOUNDS], dtype=float)
-    maxs = np.array([PARAMETER_BOUNDS[k][1] for k in PARAMETER_BOUNDS], dtype=float)
-    return mins + vec * (maxs - mins)
-
-
-def vector_to_config(vec):
-    keys = list(PARAMETER_BOUNDS.keys())
-    out = {}
-    for i, key in enumerate(keys):
-        out[key] = clamp_parameter_value(key, float(vec[i]))
-    return out
-
-
-def sample_random_config():
-    return {
-        key: random.uniform(bounds[0], bounds[1])
-        for key, bounds in PARAMETER_BOUNDS.items()
-    }
-
-
-def rbf_kernel(xa, xb, length_scale=GP_LENGTH_SCALE, signal_variance=GP_SIGNAL_VARIANCE):
-    diff = xa[:, None, :] - xb[None, :, :]
-    sqdist = np.sum(diff * diff, axis=2)
-    return signal_variance * np.exp(-0.5 * sqdist / (length_scale * length_scale))
-
-
-def normal_pdf(z):
-    return np.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
-
-
-def normal_cdf(z):
-    return 0.5 * (1.0 + np.vectorize(math.erf)(z / math.sqrt(2.0)))
-
-
-def propose_next_parameters(history):
-    valid = [h for h in history if np.isfinite(h['cost'])]
-    if len(valid) < RANDOM_INIT_ITERATIONS:
-        return sample_random_config(), 'random_init'
-
-    X = np.array([normalize_vector(config_to_vector(h['parameter_values'])) for h in valid], dtype=float)
-    y = np.array([h['cost'] for h in valid], dtype=float)
-
-    y_mean = float(np.mean(y))
-    y_std = float(np.std(y))
-    if y_std < 1e-9:
-        return sample_random_config(), 'random_flat_cost'
-    y_norm = (y - y_mean) / y_std
-
-    K = rbf_kernel(X, X)
-    K += (GP_NOISE + 1e-10) * np.eye(len(X))
-    K_inv = np.linalg.inv(K)
-
-    candidates = np.random.rand(EI_CANDIDATE_COUNT, X.shape[1])
-    K_s = rbf_kernel(X, candidates)
-    K_ss_diag = np.full(EI_CANDIDATE_COUNT, GP_SIGNAL_VARIANCE, dtype=float)
-
-    mu = K_s.T @ (K_inv @ y_norm)
-    v = K_inv @ K_s
-    var = np.maximum(K_ss_diag - np.sum(K_s * v, axis=0), 1e-12)
-    sigma = np.sqrt(var)
-
-    best = float(np.min(y_norm))
-    z = (best - mu) / sigma
-    ei = (best - mu) * normal_cdf(z) + sigma * normal_pdf(z)
-    best_idx = int(np.argmax(ei))
-
-    proposal = denormalize_vector(candidates[best_idx])
-    return vector_to_config(proposal), 'bayes_ei'
-
-
 def to_yaml_scalar(value):
     if isinstance(value, bool):
         return 'true' if value else 'false'
@@ -326,10 +257,87 @@ def set_yaml_parameter(file_path, key, value):
     file_path.write_text(''.join(lines), encoding='utf-8')
 
 
+def compute_smoothness_jitter(drift_series):
+    if len(drift_series) < 3:
+        return 0.0
+    accel = [
+        drift_series[i] - 2.0 * drift_series[i - 1] + drift_series[i - 2]
+        for i in range(2, len(drift_series))
+    ]
+    accel_energy = sum(a * a for a in accel) / len(accel)
+    return math.sqrt(accel_energy)
+
+
+def compute_positive_slope(drift_series):
+    if len(drift_series) < 2:
+        return 0.0
+
+    n = len(drift_series)
+    x_mean = 0.5 * (n - 1)
+    y_mean = sum(drift_series) / n
+    num = sum((i - x_mean) * (y - y_mean) for i, y in enumerate(drift_series))
+    den = sum((i - x_mean) ** 2 for i in range(n))
+    slope = num / den if den > 0.0 else 0.0
+    return max(0.0, slope - OBJECTIVE_BOUNDS['slope_deadband'])
+
+
 def summarize_iteration(iteration_index, reason, monitor, parameter_values, proposal_mode):
     samples = monitor.drift_samples
     natural_completion = reason == 'rosbag playback ended'
-    cost = float(np.sum(samples)) if natural_completion and samples else EARLY_EXIT_PENALTY_COST
+    if natural_completion and samples:
+        sample_count = len(samples)
+        cost_sum = float(sum(samples))
+        cost_mean = cost_sum / sample_count
+        sorted_samples = sorted(samples)
+        p95_index = max(0, min(sample_count - 1, int(0.95 * (sample_count - 1))))
+        p95_drift = float(sorted_samples[p95_index])
+        max_drift = float(sorted_samples[-1])
+
+        tail_start_index = max(0, int(sample_count * (1.0 - OBJECTIVE_TAIL_FRACTION)))
+        objective_samples = samples[tail_start_index:]
+        objective_sample_count = len(objective_samples)
+        objective_sum = float(sum(objective_samples))
+        objective_mean = objective_sum / objective_sample_count
+        objective_sorted_samples = sorted(objective_samples)
+        objective_p95_index = max(0, min(objective_sample_count - 1, int(0.95 * (objective_sample_count - 1))))
+        objective_p95_drift = float(objective_sorted_samples[objective_p95_index])
+
+        jitter_accel = compute_smoothness_jitter(objective_samples)
+        positive_slope = compute_positive_slope(objective_samples)
+        threshold = OBJECTIVE_BOUNDS['time_in_bound_threshold_m']
+        in_bound_count = sum(1 for d in objective_samples if d <= threshold)
+        time_in_bound_ratio = in_bound_count / objective_sample_count
+        out_of_bound_ratio = 1.0 - time_in_bound_ratio
+
+        objective_components = {
+            'accuracy_mean': objective_mean,
+            'accuracy_p95': objective_p95_drift,
+            'jitter_accel': jitter_accel,
+            'stability_positive_slope': positive_slope,
+            'stability_out_of_bound_ratio': out_of_bound_ratio,
+        }
+        objective_cost = sum(
+            OBJECTIVE_WEIGHTS[name] * objective_components[name]
+            for name in OBJECTIVE_WEIGHTS
+        )
+    else:
+        sample_count = len(samples)
+        cost_sum = float(sum(samples)) if samples else None
+        cost_mean = None
+        p95_drift = None
+        max_drift = None
+        objective_sample_count = None
+        objective_sum = None
+        objective_mean = None
+        objective_p95_drift = None
+        jitter_accel = None
+        positive_slope = None
+        threshold = OBJECTIVE_BOUNDS['time_in_bound_threshold_m']
+        time_in_bound_ratio = None
+        out_of_bound_ratio = None
+        objective_components = None
+        objective_cost = EARLY_EXIT_PENALTY_COST
+
     return {
         'iteration': iteration_index,
         'reason': reason,
@@ -337,30 +345,77 @@ def summarize_iteration(iteration_index, reason, monitor, parameter_values, prop
         'parameter_values': parameter_values,
         'proposal_mode': proposal_mode,
         'samples': samples,
-        'sample_count': len(samples),
-        'cost': cost,
-        'max_drift': max(samples) if samples else None,
+        'sample_count': sample_count,
+        'cost': objective_cost,
+        'cost_mode': OBJECTIVE_MODE,
+        'cost_sum': cost_sum,
+        'cost_mean': cost_mean,
+        'p95_drift': p95_drift,
+        'max_drift': max_drift,
+        'objective_sample_count': objective_sample_count,
+        'objective_sum': objective_sum,
+        'objective_mean': objective_mean,
+        'objective_p95_drift': objective_p95_drift,
+        'objective_jitter_accel': jitter_accel,
+        'objective_positive_slope': positive_slope,
+        'objective_time_in_bound_ratio': time_in_bound_ratio,
+        'objective_out_of_bound_ratio': out_of_bound_ratio,
+        'objective_time_in_bound_threshold_m': threshold,
+        'objective_weights': OBJECTIVE_WEIGHTS,
+        'objective_components': objective_components,
         'final_drift': monitor.latest_path_drift,
     }
 
 
+def create_optuna_study():
+    storage_url = f"sqlite:///{OPTUNA_STORAGE_PATH}"
+    sampler = optuna.samplers.TPESampler(multivariate=True, seed=42)
+    return optuna.create_study(
+        direction='minimize',
+        sampler=sampler,
+        study_name=OPTUNA_STUDY_NAME,
+        storage=storage_url,
+        load_if_exists=True,
+    )
+
+
+def ensure_initial_trial_enqueued(study):
+    if len(study.trials) == 0:
+        study.enqueue_trial(INITIAL_PARAMETER_VALUES)
+
+
+def propose_next_parameters_optuna(study):
+    trial = study.ask()
+    params = {}
+    for key, (lo, hi) in PARAMETER_BOUNDS.items():
+        use_log = lo > 0.0 and (hi / lo) >= 50.0
+        params[key] = clamp_parameter_value(key, trial.suggest_float(key, lo, hi, log=use_log))
+    mode = 'optuna_enqueued' if trial.number == 0 else 'optuna_tpe'
+    return trial, params, mode
+
+
 def main():
-    print("=" * 60)
-    print('UTLIDAR Configuration Optimizer')
-    print("=" * 60)
+    print('=' * 60)
+    print('UTLIDAR Configuration Optimizer (Optuna)')
+    print('=' * 60)
+
     drift_buffer = []
-    json_log_path = FSPath('drift_iterations.json')
+    json_log_path = FSPath('drift_iterations_optuna.json')
     iteration = 0
-    current_parameters = dict(INITIAL_PARAMETER_VALUES)
-    current_mode = 'initial'
+
+    study = create_optuna_study()
+    ensure_initial_trial_enqueued(study)
 
     try:
         while True:
             iteration += 1
-            print(f"\n{'=' * 60}\nStarting iteration {iteration}\n{'=' * 60}")
+            trial, current_parameters, current_mode = propose_next_parameters_optuna(study)
+            print(f"\n{'=' * 60}\nStarting iteration {iteration} (trial {trial.number})\n{'=' * 60}")
+
             for key, value in current_parameters.items():
                 set_yaml_parameter(UTLIDAR_CONFIG_PATH, key, value)
             print(f"Set {len(current_parameters)} parameters in {UTLIDAR_CONFIG_PATH} ({current_mode})")
+
             print('Cleaning up stale processes before launch...')
             cleanup_stale_processes()
             time.sleep(0.5)
@@ -395,7 +450,11 @@ def main():
                 terminate_on_failure(result['reason'])
 
             try:
-                print(f"\n{'=' * 60}\nMonitoring SLAM system (Ctrl+C to stop)...\nWatching for:\n  - Path messages from mocap and SLAM\n  - Drift between mocap and body paths\n{'=' * 60}\n")
+                print(
+                    f"\n{'=' * 60}\nMonitoring SLAM system (Ctrl+C to stop)...\n"
+                    f"Watching for:\n  - Path messages from mocap and SLAM\n"
+                    f"  - Drift between mocap and body paths\n{'=' * 60}\n"
+                )
                 executor.spin()
             except Exception as e:
                 print(f'\n\nERROR: {e}')
@@ -410,17 +469,20 @@ def main():
             summary = summarize_iteration(iteration, result['reason'], monitor, dict(current_parameters), current_mode)
             drift_buffer.append(summary)
             write_json_log(json_log_path, drift_buffer)
+
+            study.tell(trial, summary['cost'])
+            best = study.best_trial if len(study.trials) else None
+
             max_drift = 'N/A' if summary['max_drift'] is None else f"{summary['max_drift']:.3f} m"
             print(
                 f"Stored iteration {iteration}: reason={summary['reason']} | "
-                f"params={len(summary['parameter_values'])} | "
-                f"samples={summary['sample_count']} | cost={summary['cost']:.4f} | max_drift={max_drift}"
+                f"trial={trial.number} | samples={summary['sample_count']} | "
+                f"cost={summary['cost']:.4f} | max_drift={max_drift}"
             )
             print(f"Wrote JSON log: {json_log_path}")
-            print(f"Buffered iterations: {len(drift_buffer)}")
+            if best is not None:
+                print(f"Best trial so far: #{best.number} cost={best.value:.4f}")
 
-            current_parameters, current_mode = propose_next_parameters(drift_buffer)
-            print(f"Next proposal mode: {current_mode}")
             time.sleep(1.0)
 
     except KeyboardInterrupt:

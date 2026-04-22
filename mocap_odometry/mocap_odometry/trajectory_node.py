@@ -1,7 +1,12 @@
 import os
 import sys
+import time
+import threading
 import numpy as np
-import motioncapture
+try:
+    import motioncapture
+except Exception:
+    motioncapture = None
 from scipy.spatial.transform import Rotation as R
 
 import rclpy
@@ -18,12 +23,20 @@ class TrajectoryEvaluator(Node):
 
         # --- CONFIGURATION ---
         self.point_lio_odom_topic = '/state_estimation'
+        self.point_lio_odom_topic_fallback = '/aft_mapped_to_init'
         self.body_odom_topic = '/body_odom'
         self.body_path_topic = '/body_path'
         self.mocap_path_topic = '/mocap_path'
+        self.mocap_ref_topic = '/mocap_path_raw'
         self.fixed_frame = 'camera_init'
         self.target_body_name = target_body_name
         self.max_poses = 5000
+        self.offline_warmup_sec = 3.0
+        self.offline_warmup_announced = False
+        self.offline_alignment_wait_announced = False
+        self.offline_ref_timeout_sec = 2.0
+        self.allow_body_fallback_without_reference = True
+        self.optitrack_connect_timeout_sec = 3.0
         
         # Sensor to Body Center Offset
         self.local_offset = np.array([-0.2894, 0.0, 0.0468])
@@ -38,6 +51,15 @@ class TrajectoryEvaluator(Node):
         self.slam_align_rot = None
         self.mocap_initial_pos = None
         self.mocap_initial_rot_inv = None
+        self.offline_ref_pos = None
+        self.offline_ref_rot = None
+        self.offline_alignment_ready = False
+        self.offline_mocap_to_slam_rot = R.identity()
+        self.offline_mocap_to_slam_trans = np.zeros(3)
+        self.offline_ref_count = 0
+        self.last_offline_ref_wall_time = None
+        self.last_body_msg_wall_time = None
+        self.offline_fallback_active = False
 
         # File Pointers
         self.slam_file = None
@@ -55,6 +77,20 @@ class TrajectoryEvaluator(Node):
             10,
             callback_group=self.slam_cb_group
         )
+        self.odom_sub_fallback = self.create_subscription(
+            Odometry,
+            self.point_lio_odom_topic_fallback,
+            self.odom_callback,
+            10,
+            callback_group=self.slam_cb_group
+        )
+        self.offline_mocap_ref_sub = self.create_subscription(
+            Path,
+            self.mocap_ref_topic,
+            self.offline_mocap_ref_callback,
+            10,
+            callback_group=self.mocap_cb_group
+        )
         self.odom_pub = self.create_publisher(Odometry, self.body_odom_topic, 10)
         self.body_path_pub = self.create_publisher(Path, self.body_path_topic, 10)
         self.mocap_path_pub = self.create_publisher(Path, self.mocap_path_topic, 10)
@@ -63,15 +99,19 @@ class TrajectoryEvaluator(Node):
         self.body_path_msg.header.frame_id = self.fixed_frame
         self.mocap_path_msg = Path()
         self.mocap_path_msg.header.frame_id = self.fixed_frame
+        self.diag_timer = self.create_timer(2.0, self.print_diagnostics)
 
         # MoCap Connection
-        try:
-            self.mocap = motioncapture.connect("optitrack", {'hostname': '192.168.2.141'})
-            self.get_logger().info("Connected to OptiTrack. Waiting for first SLAM message...")
+        if motioncapture is None:
+            self.get_logger().warn("motioncapture Python package is not available. Running in SLAM-only mode.")
             self.use_mocap = False
-        except Exception as e:
-            self.get_logger().warn(f"Failed to connect to OptiTrack: {e}. Running in SLAM-only mode.")
-            self.use_mocap = False
+        else:
+            connected = self.try_connect_optitrack_with_timeout(self.optitrack_connect_timeout_sec)
+            if connected:
+                self.get_logger().info("Connected to OptiTrack. Waiting for first SLAM message...")
+                self.use_mocap = True
+            else:
+                self.use_mocap = False
 
         # MoCap Polling Timer (75Hz) - Only initialize if MoCap is connected
         if self.use_mocap:
@@ -81,24 +121,119 @@ class TrajectoryEvaluator(Node):
                 callback_group=self.mocap_cb_group
             )
 
+    def try_connect_optitrack_with_timeout(self, timeout_sec):
+        result = {'client': None, 'error': None}
+
+        def connect_worker():
+            try:
+                result['client'] = motioncapture.connect("optitrack", {'hostname': '192.168.2.141'})
+            except Exception as exc:
+                result['error'] = exc
+
+        thread = threading.Thread(target=connect_worker, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_sec)
+
+        if thread.is_alive():
+            self.get_logger().warn(
+                f"Timed out after {timeout_sec:.1f}s while connecting to OptiTrack. Running in SLAM-only mode."
+            )
+            return False
+
+        if result['error'] is not None:
+            self.get_logger().warn(f"Failed to connect to OptiTrack: {result['error']}. Running in SLAM-only mode.")
+            return False
+
+        self.mocap = result['client']
+        return self.mocap is not None
+
     def init_logging_files(self):
         log_dir = os.path.expanduser('~/ros2_ws')
         self.slam_file = open(os.path.join(log_dir, 'slam_trajectory.txt'), 'w')
         self.slam_file.write("# timestamp x y z qx qy qz qw\n")
         
-        if self.use_mocap:
-            self.mocap_file = open(os.path.join(log_dir, 'mocap_trajectory.txt'), 'w')
-            self.mocap_file.write("# timestamp x y z qx qy qz qw\n")
+        self.mocap_file = open(os.path.join(log_dir, 'mocap_trajectory.txt'), 'w')
+        self.mocap_file.write("# timestamp x y z qx qy qz qw\n")
             
         self.get_logger().info(f"Log files created in {log_dir}. Logging started.")
 
+    def offline_mocap_ref_callback(self, msg: Path):
+        if self.use_mocap or not msg.poses:
+            return
+
+        self.offline_ref_count += 1
+        self.last_offline_ref_wall_time = time.monotonic()
+
+        if not self.slam_ready:
+            return
+
+        pose = msg.poses[-1].pose
+        pos_raw = np.array([
+            pose.position.x,
+            pose.position.y,
+            pose.position.z,
+        ])
+        rot_raw = R.from_quat([
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        ])
+
+        self.offline_ref_pos = pos_raw
+        self.offline_ref_rot = rot_raw
+
+        if self.slam_ready and not self.offline_alignment_ready and self.slam_align_pos is not None:
+            self.offline_mocap_to_slam_rot = self.slam_align_rot * self.offline_ref_rot.inv()
+            self.offline_mocap_to_slam_trans = self.slam_align_pos - self.offline_mocap_to_slam_rot.apply(self.offline_ref_pos)
+            self.offline_alignment_ready = True
+            self.mocap_aligned = True
+            self.offline_fallback_active = False
+            self.get_logger().info("Offline alignment initialized. Transforming mocap reference into SLAM frame.")
+
+        if not self.offline_alignment_ready:
+            return
+
+        pos_aligned = self.offline_mocap_to_slam_rot.apply(pos_raw) + self.offline_mocap_to_slam_trans
+        rot_aligned = self.offline_mocap_to_slam_rot * rot_raw
+        quat_aligned = rot_aligned.as_quat()
+
+        pose_out = PoseStamped()
+        pose_out.header.stamp = msg.poses[-1].header.stamp
+        pose_out.header.frame_id = self.fixed_frame
+        pose_out.pose.position.x = float(pos_aligned[0])
+        pose_out.pose.position.y = float(pos_aligned[1])
+        pose_out.pose.position.z = float(pos_aligned[2])
+        pose_out.pose.orientation.x = float(quat_aligned[0])
+        pose_out.pose.orientation.y = float(quat_aligned[1])
+        pose_out.pose.orientation.z = float(quat_aligned[2])
+        pose_out.pose.orientation.w = float(quat_aligned[3])
+
+        self.mocap_path_msg.header.stamp = pose_out.header.stamp
+        self.mocap_path_msg.poses.append(pose_out)
+        if len(self.mocap_path_msg.poses) > self.max_poses:
+            self.mocap_path_msg.poses.pop(0)
+        self.mocap_path_pub.publish(self.mocap_path_msg)
+
+        if self.mocap_file and not self.mocap_file.closed:
+            t_mocap = pose_out.header.stamp.sec + (pose_out.header.stamp.nanosec * 1e-9)
+            line = (
+                f"{t_mocap:.6f} {pos_aligned[0]:.6f} {pos_aligned[1]:.6f} {pos_aligned[2]:.6f} "
+                f"{quat_aligned[0]:.6f} {quat_aligned[1]:.6f} {quat_aligned[2]:.6f} {quat_aligned[3]:.6f}\n"
+            )
+            self.mocap_file.write(line)
+            self.mocap_file.flush()
+
     def odom_callback(self, msg: Odometry):
         current_ros_time = self.get_clock().now().nanoseconds * 1e-9
+        self.last_body_msg_wall_time = time.monotonic()
 
         # Set T=0 on first message
         if self.start_time is None:
             self.start_time = current_ros_time
             self.get_logger().info("First SLAM message received. 10-second timer started.")
+
+        elapsed = current_ros_time - self.start_time
 
         # 1. Transform SLAM to Body Center
         pos_sensor = np.array([
@@ -117,7 +252,7 @@ class TrajectoryEvaluator(Node):
         global_offset = rot_sensor.apply(self.local_offset)
         pos_body = pos_sensor + global_offset
 
-        # 2. Publish Body Odom & Path
+        # 2. Publish Body Odom & Path immediately in SLAM frame.
         body_odom = Odometry()
         body_odom.header.stamp = msg.header.stamp
         body_odom.header.frame_id = self.fixed_frame
@@ -125,7 +260,10 @@ class TrajectoryEvaluator(Node):
         body_odom.pose.pose.position.x = float(pos_body[0])
         body_odom.pose.pose.position.y = float(pos_body[1])
         body_odom.pose.pose.position.z = float(pos_body[2])
-        body_odom.pose.pose.orientation = msg.pose.pose.orientation
+        body_odom.pose.pose.orientation.x = float(quat_sensor[0])
+        body_odom.pose.pose.orientation.y = float(quat_sensor[1])
+        body_odom.pose.pose.orientation.z = float(quat_sensor[2])
+        body_odom.pose.pose.orientation.w = float(quat_sensor[3])
 
         self.odom_pub.publish(body_odom)
 
@@ -139,26 +277,65 @@ class TrajectoryEvaluator(Node):
             self.body_path_msg.poses.pop(0)
         self.body_path_pub.publish(self.body_path_msg)
 
-        # 3. Handle 10-second alignment threshold
-        elapsed = current_ros_time - self.start_time
+        # Offline fallback: keep /mocap_path alive even when no external reference
+        # arrives, so downstream nodes continue receiving channels.
+        if (
+            not self.use_mocap
+            and self.slam_ready
+            and not self.offline_alignment_ready
+            and self.allow_body_fallback_without_reference
+        ):
+            now_wall = time.monotonic()
+            no_offline_ref = (
+                self.last_offline_ref_wall_time is None
+                or (now_wall - self.last_offline_ref_wall_time) > self.offline_ref_timeout_sec
+            )
+            if no_offline_ref:
+                self.offline_fallback_active = True
+                self.mocap_aligned = True
+                self.mocap_path_msg.header.stamp = msg.header.stamp
+                self.mocap_path_msg.poses.append(pose_stamped)
+                if len(self.mocap_path_msg.poses) > self.max_poses:
+                    self.mocap_path_msg.poses.pop(0)
+                self.mocap_path_pub.publish(self.mocap_path_msg)
+
+        # 3. Handle 3-second alignment threshold
         if elapsed >= 3.0 and not self.slam_ready:
             self.slam_align_pos = pos_body
             self.slam_align_rot = rot_sensor
             self.slam_ready = True
             
             if self.use_mocap:
-                self.get_logger().info("10 seconds elapsed. SLAM pose locked. Awaiting next MoCap frame for alignment...")
+                self.get_logger().info("3 seconds elapsed. SLAM pose locked. Awaiting next MoCap frame for alignment...")
             else:
                 self.init_logging_files()
-                self.get_logger().info("10 seconds elapsed. SLAM pose locked. Logging active in SLAM-only mode. Press Ctrl+C to stop.")
+                self.get_logger().info(
+                    f"3 seconds elapsed. SLAM pose locked. Waiting for {self.mocap_ref_topic} to align mocap into SLAM frame."
+                )
 
-        # 4. Log SLAM data if fully aligned (or if running without MoCap)
-        if self.mocap_aligned or (not self.use_mocap and self.slam_ready):
+        # 4. Log SLAM data after SLAM is ready.
+        if self.slam_ready and self.slam_file and not self.slam_file.closed:
             t_slam = msg.header.stamp.sec + (msg.header.stamp.nanosec * 1e-9)
-            ori = msg.pose.pose.orientation
-            line = f"{t_slam:.6f} {pos_body[0]:.6f} {pos_body[1]:.6f} {pos_body[2]:.6f} {ori.x:.6f} {ori.y:.6f} {ori.z:.6f} {ori.w:.6f}\n"
+            line = f"{t_slam:.6f} {pos_body[0]:.6f} {pos_body[1]:.6f} {pos_body[2]:.6f} {quat_sensor[0]:.6f} {quat_sensor[1]:.6f} {quat_sensor[2]:.6f} {quat_sensor[3]:.6f}\n"
             self.slam_file.write(line)
             self.slam_file.flush()
+
+    def print_diagnostics(self):
+        body_age = None if self.last_body_msg_wall_time is None else time.monotonic() - self.last_body_msg_wall_time
+        ref_age = None if self.last_offline_ref_wall_time is None else time.monotonic() - self.last_offline_ref_wall_time
+        body_status = 'no /state_estimation yet' if body_age is None else f'body stream age={body_age:.2f}s'
+
+        if self.use_mocap:
+            self.get_logger().info(f'{body_status} | mode=optitrack')
+            return
+
+        ref_status = 'no mocap reference yet' if ref_age is None else f'ref stream age={ref_age:.2f}s count={self.offline_ref_count}'
+        fallback_status = 'fallback=body_as_mocap ACTIVE' if self.offline_fallback_active else 'fallback=off'
+        self.get_logger().info(
+            f'{body_status} | mode=offline | ref_topic={self.mocap_ref_topic} | '
+            f'odom_topics=({self.point_lio_odom_topic},{self.point_lio_odom_topic_fallback}) | '
+            f'{ref_status} | {fallback_status}'
+        )
 
     def mocap_timer_callback(self):
         # Blocking call - safe here due to MultiThreadedExecutor

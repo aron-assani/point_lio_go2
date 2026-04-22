@@ -33,8 +33,9 @@
 		<node launch-prefix="nice" pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share point_lio)/rviz_cfg/loam_livox2.rviz"/>
 	</group>
 
-	<!-- Start rosbag player FIRST to establish clock (ROS_USE_SIM_TIME set by parent) -->
-	<executable cmd="ros2 bag play /root/ros2_ws/rosbag2_1 --clock" name="rosbag_player" />
+	<!-- Start rosbag player FIRST to establish clock (ROS_USE_SIM_TIME set by parent).
+	     Remap raw mocap topic so trajectory_node can publish aligned /mocap_path safely. -->
+	<executable cmd="ros2 bag play /root/ros2_ws/rosbag2_2 --clock --remap /mocap_path:=/mocap_path_raw" name="rosbag_player" />
 
 	<node pkg="mocap_odometry" exec="trajectory_node" name="trajectory_node" output="screen" />
 	

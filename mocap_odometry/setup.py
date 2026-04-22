@@ -22,7 +22,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'trajectory_node = mocap_odometry.trajectory_node:main'
+            'trajectory_node = mocap_odometry.trajectory_node:main',
+            'offline_trajectory_node = mocap_odometry.offline_trajectory_node:main'
         ],
     },
 )
