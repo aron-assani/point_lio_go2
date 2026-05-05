@@ -1,5 +1,22 @@
+ARG NETWORK_INTERFACE=enx2887ba59bf0a
+ARG GIT_PAT=""
+ARG POINT_LIO_REPO="https://github.com/aron-assani/point_lio_go2.git"
+
+# Builder stage: clone the private repo using the provided PAT (if any)
+FROM alpine/git:latest AS gitclone
+ARG GIT_PAT
+ARG POINT_LIO_REPO
+WORKDIR /src
+RUN if [ -n "$GIT_PAT" ]; then \
+      git clone https://$GIT_PAT@github.com/aron-assani/point_lio_go2.git point_lio; \
+    else \
+      git clone $POINT_LIO_REPO point_lio; \
+    fi
+
+# Final image
 FROM osrf/ros:humble-desktop
 
+ARG NETWORK_INTERFACE
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_WS=/root/ros2_ws
 
@@ -35,7 +52,7 @@ RUN cat <<EOF > /root/cyclonedds.xml
     <Domain id="any">
         <General>
             <Interfaces>
-                <NetworkInterface name="enx2887ba59bf0a"/>
+                <NetworkInterface name="${NETWORK_INTERFACE}"/>
             </Interfaces>
             <AllowMulticast>true</AllowMulticast>
             <MaxMessageSize>65500B</MaxMessageSize>
@@ -47,12 +64,11 @@ EOF
 RUN mkdir -p ${ROS_WS}/src
 WORKDIR ${ROS_WS}
 
-# Clone unilidar_sdk2 repository
-RUN git clone https://github.com/unitreerobotics/unilidar_sdk2.git src/unilidar_sdk2
-RUN rm -rf src/unilidar_sdk2/unitree_lidar_ros
+# Copy the repo from the builder stage
+COPY --from=gitclone /src/point_lio ${ROS_WS}/src/point_lio
 
-# Clone point_lio_go2 repository
-RUN git clone https://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@github.com/aron-assani/point_lio_go2.git src/point_lio
+# Clone unilidar_sdk2 repository
+RUN git clone https://github.com/unitreerobotics/unilidar_sdk2.git src/unilidar_sdk2 && rm -rf src/unilidar_sdk2/unitree_lidar_ros
 
 RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build"
 
@@ -60,5 +76,5 @@ RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build"
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
     echo "source ${ROS_WS}/install/setup.bash" >> ~/.bashrc
 
-# Default to interactive bash (can be overridden with command)
+# Default to interactive bash
 CMD ["/bin/bash"]

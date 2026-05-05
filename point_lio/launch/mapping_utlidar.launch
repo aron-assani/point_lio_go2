@@ -7,7 +7,7 @@
 	<node pkg="point_lio" exec="pointlio_mapping" name="laserMapping" output="screen">
 		<param from="$(find-pkg-share point_lio)/config/utlidar.yaml" />
 		
-		<param name="use_imu_as_input" value="true"/>
+		<param name="use_imu_as_input" value="false"/>
 		
 		<param name="prop_at_freq_of_imu" value="true"/>
 		<param name="check_satu" value="true"/>

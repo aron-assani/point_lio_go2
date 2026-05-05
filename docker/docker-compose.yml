@@ -3,6 +3,9 @@ services:
     container_name: point_lio_trial
     build: 
       context: .
+      args:
+        NETWORK_INTERFACE: ${NETWORK_INTERFACE}
+        GIT_PAT: ${GIT_PAT}
     network_mode: host
     ipc: host
     privileged: true
