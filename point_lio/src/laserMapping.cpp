@@ -799,26 +799,20 @@ int main(int argc, char **argv) {
 
     if (!odom_only){
         pubLaserCloudFullRes = nh->create_publisher<sensor_msgs::msg::PointCloud2>
-                ("/cloud_registered", 100000);
+                ("/slam/cloud_aligned", 100000);
         pubLaserCloudFullRes_body = nh->create_publisher<sensor_msgs::msg::PointCloud2>
-                ("/cloud_registered_body", 100000);
+                ("/slam/cloud_body_frame", 100000);
         pubLaserCloudEffect = nh->create_publisher<sensor_msgs::msg::PointCloud2>
-                ("/cloud_effected", 100000);
+                ("/slam/cloud_deskewed", 100000);
         pubLaserCloudMap = nh->create_publisher<sensor_msgs::msg::PointCloud2>
-                ("/Laser_map", 100000);
+                ("/slam/map", 100000);
         pubPath = nh->create_publisher<nav_msgs::msg::Path>
-                ("/path", 100000);
+                ("/slam/path", 100000);
     }
 
-    // Choose topic name depending on odom_only value
-    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped;
-    if (odom_only){
-        pubOdomAftMapped = nh->create_publisher<nav_msgs::msg::Odometry>
-                ("/odom_corrected", 100000);
-    } else {
-        pubOdomAftMapped = nh->create_publisher<nav_msgs::msg::Odometry>
-                ("/aft_mapped_to_init", 100000);
-    }
+    // Output main SLAM odometry regardless of odom_only mode
+    pubOdomAftMapped = nh->create_publisher<nav_msgs::msg::Odometry>
+            ("/slam/odometry", 100000);
 
     //auto plane_pub = nh->create_publisher<visualization_msgs::msg::Marker>
     //        ("/planner_normal", 1000);

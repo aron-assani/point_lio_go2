@@ -2,15 +2,20 @@
     ros__parameters:
         use_sim_time: true
 
-        use_imu_as_input: true
+        use_imu_as_input: false
+        prop_at_freq_of_imu: true
+        check_satu: true
+        init_map_size: 10
+        point_filter_num: 1
+        space_down_sample: true
+        filter_size_surf: 0.3
+        filter_size_map: 0.3
+        cube_side_length: 1000.0
         runtime_pos_log_enable: false
 
-        filter_size_surf_min: 0.2
-        filter_size_map_min: 0.2
-
         common:
-            lid_topic: "/utlidar/transformed_cloud" 
-            imu_topic: "/utlidar/transformed_raw_imu" 
+            lid_topic: "/sensors/utlidar/processed/lidar_scan" 
+            imu_topic: "/sensors/utlidar/processed/imu" 
             con_frame: false # true: if you need to combine several LiDAR frames into one
             con_frame_num: 1 # the number of frames combined
             cut_frame: false # true: if you need to cut one LiDAR frame into several subframes

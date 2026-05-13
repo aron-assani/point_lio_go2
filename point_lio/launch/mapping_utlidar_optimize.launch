@@ -23,9 +23,6 @@
 		<param name="filter_size_map" value="0.3" /> <!--0.5, 0.3, 0.15, 0.1-->
 		<param name="cube_side_length" value="1000.0" /> <!--2000-->
 		<param name="runtime_pos_log_enable" value="false" /> <!--1-->
-
-		<remap from="/cloud_registered" to="/registered_scan" />
-		<remap from="/aft_mapped_to_init" to="/state_estimation" />
 		
 	</node>
 
@@ -35,9 +32,11 @@
 
 	<!-- Start rosbag player FIRST to establish clock (ROS_USE_SIM_TIME set by parent).
 	     Remap raw mocap topic so trajectory_node can publish aligned /mocap_path safely. -->
-	<executable cmd="ros2 bag play /root/ros2_ws/rosbag2_2 --clock --remap /mocap_path:=/mocap_path_raw" name="rosbag_player" />
+\t<executable cmd="ros2 bag play /root/ros2_ws/rosbag2_2 --clock" name="rosbag_player" />
 
-	<node pkg="mocap_odometry" exec="trajectory_node" name="trajectory_node" output="screen" />
+\t<node pkg="trajectory_bridge" exec="trajectory_node" name="trajectory_node" output="screen">
+\t\t<param name="enable_optitrack" value="false" />
+\t</node>
 	
 
 

@@ -16,12 +16,11 @@ class OfflineTrajectoryEvaluator(Node):
         super().__init__('offline_trajectory_evaluator_node')
 
         # Topic configuration
-        self.point_lio_odom_topic = '/state_estimation'
-        self.point_lio_odom_topic_fallback = '/aft_mapped_to_init'
-        self.body_odom_topic = '/body_odom'
-        self.body_path_topic = '/body_path'
-        self.mocap_path_topic = '/mocap_path'
-        self.mocap_ref_topic = '/mocap_path_raw'
+        self.slam_odom_topic = '/slam/odometry'
+        self.body_pose_topic = '/robot/pose_estimate'
+        self.slam_path_topic = '/robot/path_slam'
+        self.mocap_path_topic = '/robot/path_mocap'
+        self.mocap_ref_topic = '/robot/path_mocap'
         self.fixed_frame = 'camera_init'
         self.max_poses = 5000
 
@@ -61,14 +60,7 @@ class OfflineTrajectoryEvaluator(Node):
         # I/O
         self.odom_sub = self.create_subscription(
             Odometry,
-            self.point_lio_odom_topic,
-            self.odom_callback,
-            10,
-            callback_group=self.slam_cb_group,
-        )
-        self.odom_sub_fallback = self.create_subscription(
-            Odometry,
-            self.point_lio_odom_topic_fallback,
+            self.slam_odom_topic,
             self.odom_callback,
             10,
             callback_group=self.slam_cb_group,
@@ -81,8 +73,8 @@ class OfflineTrajectoryEvaluator(Node):
             callback_group=self.ref_cb_group,
         )
 
-        self.odom_pub = self.create_publisher(Odometry, self.body_odom_topic, 10)
-        self.body_path_pub = self.create_publisher(Path, self.body_path_topic, 10)
+        self.pose_pub = self.create_publisher(Odometry, self.body_pose_topic, 10)
+        self.slam_path_pub = self.create_publisher(Path, self.slam_path_topic, 10)
         self.mocap_path_pub = self.create_publisher(Path, self.mocap_path_topic, 10)
 
         self.body_path_msg = Path()
@@ -190,28 +182,28 @@ class OfflineTrajectoryEvaluator(Node):
         global_offset = rot_sensor.apply(self.local_offset)
         pos_body = pos_sensor + global_offset
 
-        body_odom = Odometry()
-        body_odom.header.stamp = msg.header.stamp
-        body_odom.header.frame_id = self.fixed_frame
-        body_odom.child_frame_id = 'body_center'
-        body_odom.pose.pose.position.x = float(pos_body[0])
-        body_odom.pose.pose.position.y = float(pos_body[1])
-        body_odom.pose.pose.position.z = float(pos_body[2])
-        body_odom.pose.pose.orientation.x = float(quat_sensor[0])
-        body_odom.pose.pose.orientation.y = float(quat_sensor[1])
-        body_odom.pose.pose.orientation.z = float(quat_sensor[2])
-        body_odom.pose.pose.orientation.w = float(quat_sensor[3])
-        self.odom_pub.publish(body_odom)
+        body_pose = Odometry()
+        body_pose.header.stamp = msg.header.stamp
+        body_pose.header.frame_id = self.fixed_frame
+        body_pose.child_frame_id = 'body_center'
+        body_pose.pose.pose.position.x = float(pos_body[0])
+        body_pose.pose.pose.position.y = float(pos_body[1])
+        body_pose.pose.pose.position.z = float(pos_body[2])
+        body_pose.pose.pose.orientation.x = float(quat_sensor[0])
+        body_pose.pose.pose.orientation.y = float(quat_sensor[1])
+        body_pose.pose.pose.orientation.z = float(quat_sensor[2])
+        body_pose.pose.pose.orientation.w = float(quat_sensor[3])
+        self.pose_pub.publish(body_pose)
 
         pose_stamped = PoseStamped()
-        pose_stamped.header = body_odom.header
-        pose_stamped.pose = body_odom.pose.pose
+        pose_stamped.header = body_pose.header
+        pose_stamped.pose = body_pose.pose.pose
 
-        self.body_path_msg.header.stamp = msg.header.stamp
-        self.body_path_msg.poses.append(pose_stamped)
-        if len(self.body_path_msg.poses) > self.max_poses:
-            self.body_path_msg.poses.pop(0)
-        self.body_path_pub.publish(self.body_path_msg)
+        self.slam_path_msg.header.stamp = msg.header.stamp
+        self.slam_path_msg.poses.append(pose_stamped)
+        if len(self.slam_path_msg.poses) > self.max_poses:
+            self.slam_path_msg.poses.pop(0)
+        self.slam_path_pub.publish(self.slam_path_msg)
 
         if elapsed >= 3.0 and not self.slam_ready:
             self.slam_align_pos = pos_body

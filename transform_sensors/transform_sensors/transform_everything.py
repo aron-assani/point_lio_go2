@@ -22,9 +22,8 @@ class Repuber(Node):
         self.imu_sub = self.create_subscription(Imu, '/utlidar/imu', self.imu_callback, 50)
         self.cloud_sub = self.create_subscription(PointCloud2, '/utlidar/cloud', self.cloud_callback, 50)
         
-        self.imu_raw_pub = self.create_publisher(Imu, '/utlidar/transformed_raw_imu', 50)
-        self.imu_pub = self.create_publisher(Imu, '/utlidar/transformed_imu', 50)
-        self.cloud_pub = self.create_publisher(PointCloud2, '/utlidar/transformed_cloud', 50)
+        self.imu_pub = self.create_publisher(Imu, '/sensors/utlidar/processed/imu', 50)
+        self.cloud_pub = self.create_publisher(PointCloud2, '/sensors/utlidar/processed/lidar_scan', 50)
 
         self.imu_stationary_list = []
         
@@ -230,7 +229,7 @@ class Repuber(Node):
         
         transformed_imu.header.stamp = Time(nanoseconds=Time.from_msg(transformed_imu.header.stamp).nanoseconds + self.time_stamp_offset).to_msg()
         
-        self.imu_raw_pub.publish(transformed_imu)
+        self.imu_pub.publish(transformed_imu)
         
         transformed_imu.orientation.x = 0.0
         transformed_imu.orientation.y = 0.0
