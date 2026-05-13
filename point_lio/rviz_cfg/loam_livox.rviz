@@ -35,12 +35,12 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz_default_plugins/Axes
-      Enabled: true
+      Enabled: false
       Length: 1
       Name: Axes
       Radius: 0.10000000149011612
       Reference Frame: aft_mapped
-      Value: true
+      Value: false
     - Class: rviz_common/Group
       Displays:
         - Alpha: 1
@@ -283,7 +283,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 0; 0; 0
-    Fixed Frame: aft_mapped
+    Fixed Frame: camera_init
     Frame Rate: 10
   Name: root
   Tools:
