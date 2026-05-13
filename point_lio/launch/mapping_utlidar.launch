@@ -10,7 +10,7 @@
 	</node>
 
 	<group if="$(var rviz)">
-		<node launch-prefix="nice" pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share point_lio)/rviz_cfg/loam_livox2.rviz"/>
+		<node launch-prefix="nice" pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share point_lio)/rviz_cfg/loam_livox.rviz"/>
 	</group>
 
 	<node pkg="trajectory_bridge" exec="trajectory_node" name="trajectory_node" output="screen">

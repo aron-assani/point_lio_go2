@@ -5,11 +5,11 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Axes1
-        - /mapping1
-        - /mapping1/surround1
-        - /mapping1/curr1
-        - /Odometry1/Odometry1
-        - /Path1
+        - /SLAM Mapping1
+        - /SLAM Mapping1/Aligned Cloud1
+        - /SLAM Mapping1/Deskewed Cloud1
+        - /Pose Estimate1/Pose1
+        - /SLAM Path1
         - /MoCap Path1
       Splitter Ratio: 0.5
     Tree Height: 648
@@ -39,7 +39,7 @@ Visualization Manager:
       Length: 1
       Name: Axes
       Radius: 0.10000000149011612
-      Reference Frame: aft_mapped
+      Reference Frame: body_center
       Value: true
     - Class: rviz_common/Group
       Displays:
@@ -61,7 +61,7 @@ Visualization Manager:
           Max Intensity: 222.5
           Min Color: 0; 0; 0
           Min Intensity: 41
-          Name: surround
+          Name: Map
           Position Transformer: XYZ
           Selectable: true
           Size (Pixels): 3
@@ -72,7 +72,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /cloud_registered
+            Value: /slam/map
           Use Fixed Frame: true
           Use rainbow: true
           Value: false
@@ -94,7 +94,7 @@ Visualization Manager:
           Max Intensity: 249
           Min Color: 0; 0; 0
           Min Intensity: 46
-          Name: curr
+          Name: Aligned Cloud
           Position Transformer: XYZ
           Selectable: true
           Size (Pixels): 1.5
@@ -105,10 +105,43 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /registered_scan
+            Value: /slam/cloud_aligned
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
+        - Alpha: 1
+          Autocompute Intensity Bounds: false
+          Autocompute Value Bounds:
+            Max Value: 10
+            Min Value: -10
+            Value: true
+          Axis: Z
+          Channel Name: intensity
+          Class: rviz_default_plugins/PointCloud2
+          Color: 255; 255; 255
+          Color Transformer: Intensity
+          Decay Time: 0
+          Enabled: false
+          Invert Rainbow: false
+          Max Color: 239; 41; 41
+          Max Intensity: 4096
+          Min Color: 239; 41; 41
+          Min Intensity: 0
+          Name: Deskewed Cloud
+          Position Transformer: XYZ
+          Selectable: true
+          Size (Pixels): 4
+          Size (m): 0.30000001192092896
+          Style: Spheres
+          Topic:
+            Depth: 10
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /slam/cloud_deskewed
+          Use Fixed Frame: true
+          Use rainbow: true
+          Value: false
         - Alpha: 1
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
@@ -127,7 +160,7 @@ Visualization Manager:
           Max Intensity: 4096
           Min Color: 0; 0; 0
           Min Intensity: 0
-          Name: PointCloud2
+          Name: Body Frame Cloud
           Position Transformer: ""
           Selectable: true
           Size (Pixels): 3
@@ -138,12 +171,12 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: ""
+            Value: /slam/cloud_body_frame
           Use Fixed Frame: true
           Use rainbow: true
           Value: false
       Enabled: true
-      Name: mapping
+      Name: SLAM Mapping
     - Class: rviz_common/Group
       Displays:
         - Angle Tolerance: 0.10000000149011612
@@ -165,7 +198,7 @@ Visualization Manager:
             Value: true
           Enabled: true
           Keep: 100
-          Name: Odometry
+          Name: Pose
           Position Tolerance: 0.10000000149011612
           Shape:
             Alpha: 1
@@ -182,14 +215,14 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /Odometry
+            Value: /robot/pose_estimate
           Value: true
       Enabled: true
-      Name: Odometry
+      Name: Pose Estimate
     - Class: rviz_default_plugins/Axes
       Enabled: false
       Length: 1
-      Name: Axes
+      Name: World Axes
       Radius: 0.10000000149011612
       Reference Frame: <Fixed Frame>
       Value: false
@@ -203,7 +236,7 @@ Visualization Manager:
       Length: 0.30000001192092896
       Line Style: Billboards
       Line Width: 0.01
-      Name: Path
+      Name: SLAM Path
       Offset:
         X: 0
         Y: 0
@@ -218,7 +251,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /body_path
+        Value: /robot/path_slam
       Value: true
     - Alpha: 1
       Buffer Length: 1
@@ -245,86 +278,8 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /mocap_path
+        Value: /robot/path_mocap
       Value: true
-    - Alpha: 1
-      Autocompute Intensity Bounds: false
-      Autocompute Value Bounds:
-        Max Value: 10
-        Min Value: -10
-        Value: true
-      Axis: Z
-      Channel Name: intensity
-      Class: rviz_default_plugins/PointCloud2
-      Color: 255; 255; 255
-      Color Transformer: Intensity
-      Decay Time: 0
-      Enabled: false
-      Invert Rainbow: false
-      Max Color: 239; 41; 41
-      Max Intensity: 4096
-      Min Color: 239; 41; 41
-      Min Intensity: 0
-      Name: PointCloud2
-      Position Transformer: XYZ
-      Selectable: true
-      Size (Pixels): 4
-      Size (m): 0.30000001192092896
-      Style: Spheres
-      Topic:
-        Depth: 10
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /cloud_effected
-      Use Fixed Frame: true
-      Use rainbow: true
-      Value: false
-    - Alpha: 1
-      Autocompute Intensity Bounds: true
-      Autocompute Value Bounds:
-        Max Value: 10
-        Min Value: -10
-        Value: true
-      Axis: Z
-      Channel Name: intensity
-      Class: rviz_default_plugins/PointCloud2
-      Color: 255; 255; 255
-      Color Transformer: ""
-      Decay Time: 0
-      Enabled: false
-      Invert Rainbow: false
-      Max Color: 255; 255; 255
-      Max Intensity: 4096
-      Min Color: 0; 0; 0
-      Min Intensity: 0
-      Name: PointCloud2
-      Position Transformer: ""
-      Selectable: true
-      Size (Pixels): 3
-      Size (m): 0.009999999776482582
-      Style: Flat Squares
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: ""
-      Use Fixed Frame: true
-      Use rainbow: true
-      Value: false
-    - Class: rviz_default_plugins/MarkerArray
-      Enabled: false
-      Name: MarkerArray
-      Namespaces:
-        {}
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: ""
-      Value: false
   Enabled: true
   Global Options:
     Background Color: 0; 0; 0
