@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = 'mocap_odometry'
+package_name = 'trajectory_bridge'
 
 setup(
     name=package_name,
@@ -22,9 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'trajectory_node = mocap_odometry.trajectory_node:main',
-            'offline_trajectory_node = mocap_odometry.offline_trajectory_node:main'
-        ],
+            'trajectory_node = trajectory_bridge.trajectory_node:main'        ],
     },
 )
 
