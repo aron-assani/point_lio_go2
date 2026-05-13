@@ -34,13 +34,7 @@ Visualization Manager:
       Plane Cell Count: 100
       Reference Frame: <Fixed Frame>
       Value: true
-    - Class: rviz_default_plugins/Axes
-      Enabled: false
-      Length: 1
-      Name: Axes
-      Radius: 0.10000000149011612
-      Reference Frame: aft_mapped
-      Value: false
+
     - Class: rviz_common/Group
       Displays:
         - Alpha: 1
@@ -219,13 +213,7 @@ Visualization Manager:
           Value: true
       Enabled: true
       Name: Pose Estimate
-    - Class: rviz_default_plugins/Axes
-      Enabled: false
-      Length: 1
-      Name: World Axes
-      Radius: 0.10000000149011612
-      Reference Frame: <Fixed Frame>
-      Value: false
+
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
