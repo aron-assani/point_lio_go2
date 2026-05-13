@@ -22,7 +22,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'trajectory_node = trajectory_bridge.trajectory_node:main'        ],
+            'trajectory_node = trajectory_bridge.trajectory_node:main',
+            'offline_trajectory_node = trajectory_bridge.offline_trajectory_node:main',
+        ],
     },
 )
 
