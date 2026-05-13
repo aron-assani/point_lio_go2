@@ -811,6 +811,7 @@ int main(int argc, char **argv) {
     }
 
     // Output main SLAM odometry regardless of odom_only mode
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped;
     pubOdomAftMapped = nh->create_publisher<nav_msgs::msg::Odometry>
             ("/slam/odometry", 100000);
 
