@@ -231,16 +231,16 @@ class Repuber(Node):
         
         self.imu_pub.publish(transformed_imu)
         
-        transformed_imu.orientation.x = 0.0
-        transformed_imu.orientation.y = 0.0
-        transformed_imu.orientation.z = 0.0
-        transformed_imu.orientation.w = 1.0
+        # transformed_imu.orientation.x = 0.0
+        # transformed_imu.orientation.y = 0.0
+        # transformed_imu.orientation.z = 0.0
+        # transformed_imu.orientation.w = 1.0
         
-        transformed_imu.linear_acceleration.x = 0.0
-        transformed_imu.linear_acceleration.y = 0.0
-        transformed_imu.linear_acceleration.z = 0.0
+        # transformed_imu.linear_acceleration.x = 0.0
+        # transformed_imu.linear_acceleration.y = 0.0
+        # transformed_imu.linear_acceleration.z = 0.0
         
-        self.imu_pub.publish(transformed_imu)
+        # self.imu_pub.publish(transformed_imu)
 
 def main(args=None):
     rclpy.init(args=args)

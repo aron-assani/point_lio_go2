@@ -164,7 +164,7 @@ Visualization Manager:
               Value: true
             Value: true
           Enabled: true
-          Keep: 1
+          Keep: 100
           Name: Odometry
           Position Tolerance: 0.10000000149011612
           Shape:
@@ -176,7 +176,7 @@ Visualization Manager:
             Head Radius: 0.10000000149011612
             Shaft Length: 1
             Shaft Radius: 0.05000000074505806
-            Value: None
+            Value: Arrow
           Topic:
             Depth: 5
             Durability Policy: Volatile
@@ -199,7 +199,7 @@ Visualization Manager:
       Color: 25; 255; 0
       Enabled: true
       Line Style: Billboards
-      Line Width: 0.01
+      Line Width: 0.
       Name: Path
       Offset:
         X: 0
@@ -348,6 +348,18 @@ Visualization Manager:
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
       Yaw: 5.823579788208008
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 869
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd00000001000000000000019c0000030bfc0200000001fb000000100044006900730070006c006100790073010000003d0000030b000000c900ffffff000003580000030b00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Width: 1274
+  X: 574
+  Y: 98
+5.823579788208008
     Saved: ~
 Window Geometry:
   Displays:
