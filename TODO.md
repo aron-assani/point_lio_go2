@@ -6,9 +6,10 @@ SLAM-ben futó Kálmán szűrő: Iterated Kalman Filters on Manifolds (IkFoM) ht
 Point-LIO ROS2-be átírt változatavan felhasználva https://github.com/dfloreaa/point_lio_ros2
 LiDAR pózt beállító segédprogram: transform_sensors https://github.com/jizhang-cmu/autonomy_stack_go2
 "Body" pont pályáját és mocap pályát megjelenítő segédprogram: trajectory_bridge
+Rviz-ben a koordináta-rendszer a LiDAR origóját mutatja
 
-+-2cm pontosság
++-2cm pontossággal van a LiDar (Unitree L1) reklámozva
 
 Mérések több különböző kezdőpontból indultak.
 Pontosság csökkent a kezdőpontból való távolság szerint
-Statiku
+Statikus eltérésként jelenik meg a pontatlanság
