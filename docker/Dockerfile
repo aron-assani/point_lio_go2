@@ -72,6 +72,12 @@ RUN git clone https://github.com/unitreerobotics/unilidar_sdk2.git src/unilidar_
 
 RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build"
 
+# Install unitree_sdk2_python from source
+RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git src/unitree_sdk2_python && \
+    /bin/bash -c "source /opt/ros/humble/setup.bash && cd src/unitree_sdk2_python && pip3 install -e ."
+
+RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build"
+
 # Environment setup
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
     echo "source ${ROS_WS}/install/setup.bash" >> ~/.bashrc

@@ -1,0 +1,8 @@
+<launch>
+    <arg name="enable_navigation" default="false" />
+
+    <group if="$(var enable_navigation)">
+        <node pkg="movement" exec="path_executor" name="path_executor" output="screen" />
+        <node pkg="movement" exec="straight_line_planner" name="straight_line_movement" output="screen" />
+    </group>
+</launch>

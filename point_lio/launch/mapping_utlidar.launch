@@ -1,20 +1,25 @@
 <launch>
-	<!-- Launch file for Unitree L1 LiDAR mounted on Go2 -->
-	<arg name="rviz" default="true" />
-	<arg name="enable_optitrack" default="true" />
+    <arg name="rviz" default="true" />
+    <arg name="enable_optitrack" default="true" />
+    
+    <arg name="enable_navigation" default="true" />
 
-	<node pkg="transform_sensors" exec="transform_everything" name="transform_everything" output="screen" />
+    <node pkg="transform_sensors" exec="transform_everything" name="transform_everything" output="screen" />
 
-	<node pkg="point_lio" exec="pointlio_mapping" name="laserMapping" output="screen">
-		<param from="$(find-pkg-share point_lio)/config/utlidar.yaml" />
-	</node>
+    <node pkg="point_lio" exec="pointlio_mapping" name="laserMapping" output="screen">
+        <param from="$(find-pkg-share point_lio)/config/utlidar.yaml" />
+    </node>
 
-	<group if="$(var rviz)">
-		<node launch-prefix="nice" pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share point_lio)/rviz_cfg/loam_livox.rviz"/>
-	</group>
+    <group if="$(var rviz)">
+        <node launch-prefix="nice" pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share point_lio)/rviz_cfg/loam_livox.rviz"/>
+    </group>
 
-	<node pkg="trajectory_bridge" exec="trajectory_node" name="trajectory_node" output="screen">
-		<param name="enable_optitrack" value="$(var enable_optitrack)" />
-	</node>
+    <node pkg="trajectory_bridge" exec="trajectory_node" name="trajectory_node" output="screen">
+        <param name="enable_optitrack" value="$(var enable_optitrack)" />
+    </node>
+
+    <include file="$(find-pkg-share movement)/launch/movement.launch.xml">
+        <arg name="enable_navigation" value="$(var enable_navigation)" />
+    </include>
 
 </launch>

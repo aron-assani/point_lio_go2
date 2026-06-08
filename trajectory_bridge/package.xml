@@ -4,7 +4,7 @@
   <name>trajectory_bridge</name>
   <version>0.0.0</version>
   <description>Broadcasts OptiTrack motion capture data as ROS 2 Odometry</description>
-  <maintainer email="user@todo.todo">User</maintainer>
+  <maintainer email="assaniaron13@gmail.com">User</maintainer>
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>

@@ -14,7 +14,7 @@ Quick start
 ```bash
 docker compose build --build-arg GIT_PAT=<GithubPath> --build-arg NETWORK_INTERFACE=<NetworkInterface>
 docker compose up -d
-docker exec -it point_lio_trial /bin/bash
+docker exec -it point_lio_go2 /bin/bash
 ```
 
 ```bash

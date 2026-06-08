@@ -1,6 +1,6 @@
 services:
   point_lio:
-    container_name: point_lio_trial
+    container_name: point_lio_go2
     build: 
       context: .
       args:
