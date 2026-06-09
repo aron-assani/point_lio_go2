@@ -19,5 +19,5 @@ docker exec -it point_lio_go2 /bin/bash
 
 ```bash
 ros2 launch point_lio mapping_utlidar.launch
-ros2 launch point_lio mapping_utlidar.launch enable_optitrack:=false
+ros2 launch point_lio mapping_utlidar.launch enable_optitrack:=true
 ```

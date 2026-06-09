@@ -43,7 +43,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Point-LIO Python dependencies
-RUN pip3 install motioncapture scipy pyyaml numpy
+RUN pip3 install motioncapture scipy pyyaml "numpy<2"
 
 # CycloneDDS configuration
 RUN cat <<EOF > /root/cyclonedds.xml

@@ -1,8 +1,7 @@
 <launch>
     <arg name="rviz" default="true" />
-    <arg name="enable_optitrack" default="true" />
-    
     <arg name="enable_navigation" default="true" />
+    <arg name="enable_optitrack" default="false" />
 
     <node pkg="transform_sensors" exec="transform_everything" name="transform_everything" output="screen" />
 
