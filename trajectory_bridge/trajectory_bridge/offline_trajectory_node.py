@@ -19,8 +19,11 @@ class OfflineTrajectoryEvaluator(Node):
         self.slam_odom_topic = '/slam/odometry'
         self.body_pose_topic = '/robot/pose_estimate'
         self.slam_path_topic = '/robot/path_slam'
-        self.mocap_path_topic = '/robot/path_mocap'
-        self.mocap_ref_topic = '/robot/path_mocap'
+        
+        # FIXED: Split the read and write topics to prevent feedback loops
+        self.mocap_ref_topic = '/mocap_path'        # Input: Raw data from rosbag
+        self.mocap_path_topic = '/robot/path_mocap' # Output: Aligned data for RViz
+        
         self.fixed_frame = 'camera_init'
         self.max_poses = 5000
 
@@ -204,71 +207,3 @@ class OfflineTrajectoryEvaluator(Node):
         if len(self.slam_path_msg.poses) > self.max_poses:
             self.slam_path_msg.poses.pop(0)
         self.slam_path_pub.publish(self.slam_path_msg)
-
-        if elapsed >= 3.0 and not self.slam_ready:
-            self.slam_align_pos = pos_body
-            self.slam_align_rot = rot_sensor
-            self.slam_ready = True
-            self.init_logging_files()
-            self.get_logger().info(
-                f'SLAM pose locked. Waiting for {self.mocap_ref_topic} to align mocap into SLAM frame.'
-            )
-
-        if (
-            self.slam_ready
-            and not self.offline_alignment_ready
-            and self.allow_body_fallback_without_reference
-        ):
-            now_wall = time.monotonic()
-            no_ref = (
-                self.last_offline_ref_wall_time is None
-                or (now_wall - self.last_offline_ref_wall_time) > self.offline_ref_timeout_sec
-            )
-            if no_ref:
-                self.offline_fallback_active = True
-                self.mocap_aligned = True
-                self.mocap_path_msg.header.stamp = msg.header.stamp
-                self.mocap_path_msg.poses.append(pose_stamped)
-                if len(self.mocap_path_msg.poses) > self.max_poses:
-                    self.mocap_path_msg.poses.pop(0)
-                self.mocap_path_pub.publish(self.mocap_path_msg)
-
-        if self.slam_ready and self.slam_file and not self.slam_file.closed:
-            t_slam = msg.header.stamp.sec + (msg.header.stamp.nanosec * 1e-9)
-            line = (
-                f'{t_slam:.6f} {pos_body[0]:.6f} {pos_body[1]:.6f} {pos_body[2]:.6f} '
-                f'{quat_sensor[0]:.6f} {quat_sensor[1]:.6f} {quat_sensor[2]:.6f} {quat_sensor[3]:.6f}\n'
-            )
-            self.slam_file.write(line)
-            self.slam_file.flush()
-
-    def shutdown_routine(self):
-        self.get_logger().info('Shutting down node... ensuring data is saved.')
-        if self.slam_file and not self.slam_file.closed:
-            self.slam_file.flush()
-            self.slam_file.close()
-        if self.mocap_file and not self.mocap_file.closed:
-            self.mocap_file.flush()
-            self.mocap_file.close()
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = OfflineTrajectoryEvaluator()
-
-    executor = MultiThreadedExecutor(num_threads=2)
-    executor.add_node(node)
-
-    try:
-        executor.spin()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.shutdown_routine()
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()

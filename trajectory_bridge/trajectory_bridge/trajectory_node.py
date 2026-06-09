@@ -4,14 +4,13 @@ import threading
 import numpy as np
 try:
     import motioncapture
-except Exception:
+except ImportError:
     motioncapture = None
 from scipy.spatial.transform import Rotation as R
 
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped
 
@@ -44,23 +43,17 @@ class TrajectoryEvaluator(Node):
         self.slam_align_rot = None
         self.mocap_initial_pos = None
         self.mocap_initial_rot_inv = None
-        self.last_body_msg_wall_time = None
 
         # File Pointers
         self.slam_file = None
         self.mocap_file = None
-
-        # Callbacks Groups
-        self.slam_cb_group = MutuallyExclusiveCallbackGroup()
-        self.mocap_cb_group = MutuallyExclusiveCallbackGroup()
 
         # Publishers & Subscribers
         self.odom_sub = self.create_subscription(
             Odometry, 
             self.slam_odom_topic, 
             self.odom_callback, 
-            10,
-            callback_group=self.slam_cb_group
+            10
         )
         self.pose_pub = self.create_publisher(Odometry, self.body_pose_topic, 10)
         self.slam_path_pub = self.create_publisher(Path, self.slam_path_topic, 10)
@@ -70,6 +63,10 @@ class TrajectoryEvaluator(Node):
         self.slam_path_msg.header.frame_id = self.fixed_frame
         self.mocap_path_msg = Path()
         self.mocap_path_msg.header.frame_id = self.fixed_frame
+        
+        # Thread handles
+        self.mocap_thread = None
+        self.is_running = True
 
         # MoCap Connection
         if not self.optitrack_enabled:
@@ -82,16 +79,12 @@ class TrajectoryEvaluator(Node):
             if connected:
                 self.get_logger().info('Connected to OptiTrack.')
                 self.use_mocap = True
+                
+                # Start dedicated background thread for MoCap polling
+                self.mocap_thread = threading.Thread(target=self.mocap_worker_loop, daemon=True)
+                self.mocap_thread.start()
             else:
                 self.use_mocap = False
-
-        # MoCap Polling Timer (75Hz) - Only initialize if MoCap is connected
-        if self.use_mocap:
-            self.timer = self.create_timer(
-                1.0 / 75.0, 
-                self.mocap_timer_callback, 
-                callback_group=self.mocap_cb_group
-            )
 
     def try_connect_optitrack_with_timeout(self, timeout_sec):
         result = {'client': None, 'error': None}
@@ -131,7 +124,6 @@ class TrajectoryEvaluator(Node):
 
     def odom_callback(self, msg: Odometry):
         current_ros_time = self.get_clock().now().nanoseconds * 1e-9
-        self.last_body_msg_wall_time = time.monotonic()
 
         # Set T=0 on first message
         if self.start_time is None:
@@ -201,71 +193,75 @@ class TrajectoryEvaluator(Node):
             self.slam_file.write(line)
             self.slam_file.flush()
 
-    def mocap_timer_callback(self):
-        # Blocking call - safe here due to MultiThreadedExecutor
-        self.mocap.waitForNextFrame()
-        
-        if not self.slam_ready:
-            return
-        
-        body = self.mocap.rigidBodies.get(self.target_body_name)
-        
-        if body is None:
-            return
+    def mocap_worker_loop(self):
+        """Dedicated thread to safely block on OptiTrack frames without halting ROS."""
+        while rclpy.ok() and self.is_running:
+            try:
+                # Safely block here
+                self.mocap.waitForNextFrame()
+                
+                if not self.slam_ready:
+                    continue
+                
+                body = self.mocap.rigidBodies.get(self.target_body_name)
+                if body is None:
+                    continue
 
-        t_mocap = self.get_clock().now().nanoseconds * 1e-9
-        now_msg = self.get_clock().now().to_msg()
+                t_mocap = self.get_clock().now().nanoseconds * 1e-9
+                now_msg = self.get_clock().now().to_msg()
 
-        for name, body in self.mocap.rigidBodies.items():
-            if self.target_body_name and name != self.target_body_name:
-                continue
+                pos_raw = np.array([body.position[0], body.position[1], body.position[2]])
+                rot_raw = R.from_quat([body.rotation.x, body.rotation.y, body.rotation.z, body.rotation.w])
 
-            pos_raw = np.array([body.position[0], body.position[1], body.position[2]])
-            rot_raw = R.from_quat([body.rotation.x, body.rotation.y, body.rotation.z, body.rotation.w])
+                # 1. Capture alignment frame
+                if self.mocap_initial_pos is None:
+                    self.mocap_initial_pos = pos_raw
+                    self.mocap_initial_rot_inv = rot_raw.inv()
+                    self.init_logging_files()
+                    self.mocap_aligned = True
+                    self.get_logger().info('OptiTrack aligned to SLAM frame. Publishing mocap trajectory.')
 
-            # 1. Capture alignment frame
-            if self.mocap_initial_pos is None:
-                self.mocap_initial_pos = pos_raw
-                self.mocap_initial_rot_inv = rot_raw.inv()
-                self.init_logging_files()
-                self.mocap_aligned = True
-                self.get_logger().info('OptiTrack aligned to SLAM frame. Publishing mocap trajectory.')
+                # 2. Align Data
+                pos_zero = self.mocap_initial_rot_inv.apply(pos_raw - self.mocap_initial_pos)
+                rot_zero = self.mocap_initial_rot_inv * rot_raw
+                
+                pos_aligned = self.slam_align_rot.apply(pos_zero) + self.slam_align_pos
+                rot_aligned = self.slam_align_rot * rot_zero
+                quat_aligned = rot_aligned.as_quat()
 
-            # 2. Align Data
-            pos_zero = self.mocap_initial_rot_inv.apply(pos_raw - self.mocap_initial_pos)
-            rot_zero = self.mocap_initial_rot_inv * rot_raw
-            
-            pos_aligned = self.slam_align_rot.apply(pos_zero) + self.slam_align_pos
-            rot_aligned = self.slam_align_rot * rot_zero
-            quat_aligned = rot_aligned.as_quat()
+                # 3. Publish Mocap Path
+                pose = PoseStamped()
+                pose.header.stamp = now_msg
+                pose.header.frame_id = self.fixed_frame
+                pose.pose.position.x = float(pos_aligned[0])
+                pose.pose.position.y = float(pos_aligned[1])
+                pose.pose.position.z = float(pos_aligned[2])
+                pose.pose.orientation.x = float(quat_aligned[0])
+                pose.pose.orientation.y = float(quat_aligned[1])
+                pose.pose.orientation.z = float(quat_aligned[2])
+                pose.pose.orientation.w = float(quat_aligned[3])
 
-            # 3. Publish Mocap Path
-            pose = PoseStamped()
-            pose.header.stamp = now_msg
-            pose.header.frame_id = self.fixed_frame
-            pose.pose.position.x = float(pos_aligned[0])
-            pose.pose.position.y = float(pos_aligned[1])
-            pose.pose.position.z = float(pos_aligned[2])
-            pose.pose.orientation.x = float(quat_aligned[0])
-            pose.pose.orientation.y = float(quat_aligned[1])
-            pose.pose.orientation.z = float(quat_aligned[2])
-            pose.pose.orientation.w = float(quat_aligned[3])
+                self.mocap_path_msg.header.stamp = now_msg
+                self.mocap_path_msg.poses.append(pose)
+                if len(self.mocap_path_msg.poses) > self.max_poses:
+                    self.mocap_path_msg.poses.pop(0)
+                self.mocap_path_pub.publish(self.mocap_path_msg)
 
-            self.mocap_path_msg.header.stamp = now_msg
-            self.mocap_path_msg.poses.append(pose)
-            if len(self.mocap_path_msg.poses) > self.max_poses:
-                self.mocap_path_msg.poses.pop(0)
-            self.mocap_path_pub.publish(self.mocap_path_msg)
+                # 4. Log Mocap Data
+                if self.mocap_aligned and self.mocap_file and not self.mocap_file.closed:
+                    line = f"{t_mocap:.6f} {pos_aligned[0]:.6f} {pos_aligned[1]:.6f} {pos_aligned[2]:.6f} {quat_aligned[0]:.6f} {quat_aligned[1]:.6f} {quat_aligned[2]:.6f} {quat_aligned[3]:.6f}\n"
+                    self.mocap_file.write(line)
+                    self.mocap_file.flush()
 
-            # 4. Log Mocap Data
-            if self.mocap_aligned:
-                line = f"{t_mocap:.6f} {pos_aligned[0]:.6f} {pos_aligned[1]:.6f} {pos_aligned[2]:.6f} {quat_aligned[0]:.6f} {quat_aligned[1]:.6f} {quat_aligned[2]:.6f} {quat_aligned[3]:.6f}\n"
-                self.mocap_file.write(line)
-                self.mocap_file.flush()
-            
-            break 
+            except Exception as e:
+                self.get_logger().warn(f'OptiTrack read error: {e}')
+                time.sleep(0.01)
 
     def shutdown_routine(self):
+        self.is_running = False
+        if self.mocap_thread and self.mocap_thread.is_alive():
+            self.mocap_thread.join(timeout=1.0)
+            
         if self.slam_file and not self.slam_file.closed:
             self.slam_file.flush()
             self.slam_file.close()
