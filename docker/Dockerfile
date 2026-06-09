@@ -33,17 +33,14 @@ RUN apt-get update && apt-get install -y \
     ros-humble-visualization-msgs \
     nano \
     ros-humble-rmw-cyclonedds-cpp \
-    ros-humble-tf-transformations \
     ros-humble-rosbag2 \
-    python3-transforms3d \
-    python3-scipy \
     python3-tk \
     python3-pip \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Point-LIO Python dependencies
-RUN pip3 install motioncapture scipy pyyaml "numpy<2"
+RUN pip3 install "numpy>=2.0.0" "scipy>=1.14.0" motioncapture pyyaml   
 
 # CycloneDDS configuration
 RUN cat <<EOF > /root/cyclonedds.xml
