@@ -1,5 +1,6 @@
 docker compose build --build-arg GIT_PAT=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 --build-arg NETWORK_INTERFACE=eno2 --no-cache
 
+-e NETWORK_INTERFACE=<new interface>
 
 SLAM algoritmus: Point LiDAR Inertial Odometry (Point-LIO) https://github.com/hku-mars/Point-LIO , https://advanced.onlinelibrary.wiley.com/doi/epdf/10.1002/aisy.202200459
 SLAM-ben futó Kálmán szűrő: Iterated Kalman Filters on Manifolds (IkFoM) https://github.com/hku-mars/IKFoM
