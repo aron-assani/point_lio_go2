@@ -2,17 +2,19 @@ import math
 import sys
 import os
 import threading
+import select
+import termios
+import tty
 import time
 
 import rclpy
 from nav_msgs.msg import Path
-from std_msgs.msg import Empty
 from rclpy.node import Node
+from std_msgs.msg import Empty
 
 try:
     from unitree_sdk2py.core.channel import ChannelFactoryInitialize
     from unitree_sdk2py.go2.sport.sport_client import SportClient
-    from unitree_sdk2py.go2.obstacles_avoid.obstacles_avoid_client import ObstaclesAvoidClient
     SDK_AVAILABLE = True
 except ImportError:
     SDK_AVAILABLE = False
@@ -69,33 +71,28 @@ class PathExecutor(Node):
         self.prev_yaw_rate = 0.0
 
         if not self.is_offline and SDK_AVAILABLE:
-            # Init sport client API
             self.sport_client = SportClient()
             self.sport_client.SetTimeout(10.0)
             self.sport_client.Init()
 
-            # Init obstacle avoidance client
-            self.avoid_client = ObstaclesAvoidClient()
-            self.avoid_client.SetTimeout(10.0)
-            self.avoid_client.Init()
+            self.get_logger().info("Initializing robot posture... Standing up.")
+            self.sport_client.StandUp()
+            time.sleep(2.0)
             
-            self.get_logger().info("Activating hardware obstacle avoidance subsystem...")
-            self.avoid_client.SwitchSet(True)
-            self.avoid_client.UseRemoteCommandFromApi(True)
+            self.get_logger().info("Engaging FreeWalk mode to unlock velocity tracking...")
+            self.sport_client.FreeWalk()
+            time.sleep(1.0)
         else:
             self.get_logger().warn("OFFLINE MODE: Hardware clients bypassed. Simulating velocity commands.")
 
-        # Subscriptions
         self.path_sub = self.create_subscription(Path, self.path_topic, self.path_callback, 10)
         self.slam_sub = self.create_subscription(Path, self.slam_topic, self.slam_callback, 10)
         
-        # Emergency Stop Subscription
         self.estop_sub = self.create_subscription(Empty, '/emergency_stop', self.estop_callback, 10)
         
         self.control_timer = self.create_timer(self.control_period, self.control_callback)
 
     def estop_callback(self, msg):
-        """Triggered immediately when an Empty message hits /emergency_stop"""
         self.get_logger().error("Emergency Stop received via ROS topic! Halting execution node.")
         self.shutdown_clients()
         time.sleep(0.2)
@@ -154,7 +151,7 @@ class PathExecutor(Node):
 
         if distance <= self.position_tolerance:
             if not self.is_offline:
-                self.avoid_client.Move(0.0, 0.0, 0.0)
+                self.sport_client.StopMove()
             else:
                 self.get_logger().info("Target reached in offline mode.", throttle_duration_sec=2.0)
                 
@@ -184,20 +181,16 @@ class PathExecutor(Node):
         max_dv_linear = self.max_linear_accel * self.control_period
         max_dv_yaw = self.max_yaw_accel * self.control_period
 
-        # Apply limits
         vx = max(self.prev_vx - max_dv_linear, min(self.prev_vx + max_dv_linear, target_vx))
         vy = max(self.prev_vy - max_dv_linear, min(self.prev_vy + max_dv_linear, target_vy))
         yaw_rate = max(self.prev_yaw_rate - max_dv_yaw, min(self.prev_yaw_rate + max_dv_yaw, target_yaw_rate))
 
-        # Update tracking state
         self.prev_vx = vx
         self.prev_vy = vy
         self.prev_yaw_rate = yaw_rate
 
         if not self.is_offline:
-            self.avoid_client.Move(vx, vy, yaw_rate)
-        else:
-            pass
+            self.sport_client.Move(vx, vy, yaw_rate)
 
     def shutdown_clients(self):
         if self.is_offline:
@@ -206,9 +199,8 @@ class PathExecutor(Node):
             
         self.get_logger().info("Releasing remote API control and halting...")
         if SDK_AVAILABLE:
-            self.avoid_client.Move(0.0, 0.0, 0.0)
-            self.avoid_client.UseRemoteCommandFromApi(False)
-            self.avoid_client.SwitchSet(False)
+            self.sport_client.StopMove()
+            self.sport_client.StandDown()
 
     @staticmethod
     def quaternion_to_yaw(x, y, z, w):

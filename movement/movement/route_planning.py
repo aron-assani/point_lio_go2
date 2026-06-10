@@ -34,8 +34,16 @@ class StraightLineMovement(Node):
         self.path_pub = self.create_publisher(Path, self.plan_topic, 10)
         self.path_sub = self.create_subscription(Path, self.slam_topic, self.slam_callback, 10)
         
-        # E-stop subscription
+        # RViz Goal Subscription
+        self.goal_sub = self.create_subscription(PoseStamped, '/goal_pose', self.rviz_goal_callback, 10)
+        
+        # Emergency Stop Subscription
         self.estop_sub = self.create_subscription(Empty, '/emergency_stop', self.estop_callback, 10)
+
+    def rviz_goal_callback(self, msg: PoseStamped):
+        """Intercepts interactive target markers placed inside the RViz viewport"""
+        self.get_logger().info(f"New target frame accepted from RViz: x={msg.pose.position.x:.3f}, y={msg.pose.position.y:.3f}")
+        self.set_target(msg.pose.position.x, msg.pose.position.y, msg.pose.position.z)
 
     def estop_callback(self, msg):
         self.get_logger().error("Emergency Stop received via ROS topic! Halting planning node.")

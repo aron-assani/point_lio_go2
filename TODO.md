@@ -1,5 +1,8 @@
 docker compose build --build-arg GIT_PAT=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 --build-arg NETWORK_INTERFACE=eno2 --no-cache
 
+NETWORK_INTERFACE=eno2 ros2 launch point_lio mapping_utlidar.launch enable_navigation:=true enable_optitrack:=true
+
+
 -e NETWORK_INTERFACE=<new interface>
 
 ros2 run movement keyboard_estop
