@@ -97,6 +97,11 @@ class PathExecutor(Node):
         self.keyboard_thread.start()
 
     def keyboard_listener(self):
+        # Prevent crash when launched via ros2 launch (no TTY attached)
+        if not sys.stdin.isatty():
+            self.get_logger().warn("Not running in a terminal. Keyboard kill switch ('P') is disabled.")
+            return
+
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
@@ -194,7 +199,6 @@ class PathExecutor(Node):
         self.apply_ramp_and_send(target_vx, target_vy, target_yaw_rate)
 
     def apply_ramp_and_send(self, target_vx, target_vy, target_yaw_rate):
-        """Saturates step changes in velocity and executes via Avoidance Client."""
         max_dv_linear = self.max_linear_accel * self.control_period
         max_dv_yaw = self.max_yaw_accel * self.control_period
 
@@ -214,7 +218,6 @@ class PathExecutor(Node):
             pass
 
     def shutdown_clients(self):
-        """Safely releases control APIs and halts the robot."""
         if self.is_offline:
             self.get_logger().info("Offline mode: Skipping hardware shutdown sequence.")
             return
