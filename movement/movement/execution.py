@@ -11,13 +11,20 @@ import rclpy
 from nav_msgs.msg import Path
 from rclpy.node import Node
 
-from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-from unitree_sdk2py.go2.obstacles_avoid.obstacles_avoid_client import ObstaclesAvoidClient
+try:
+    from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+    from unitree_sdk2py.go2.sport.sport_client import SportClient
+    from unitree_sdk2py.go2.obstacles_avoid.obstacles_avoid_client import ObstaclesAvoidClient
+    SDK_AVAILABLE = True
+except ImportError:
+    SDK_AVAILABLE = False
 
 
 class PathExecutor(Node):
-    def __init__(self):
+    def __init__(self, is_offline=False):
         super().__init__('path_executor')
+        
+        self.is_offline = is_offline
 
         self.declare_parameter('path_topic', '/robot/path_straight_line')
         self.declare_parameter('slam_topic', '/robot/path_slam')
@@ -63,14 +70,22 @@ class PathExecutor(Node):
         self.prev_vy = 0.0
         self.prev_yaw_rate = 0.0
 
-        # Init obstacle avoidance client
-        self.avoid_client = ObstaclesAvoidClient()
-        self.avoid_client.SetTimeout(10.0)
-        self.avoid_client.Init()
-        
-        self.get_logger().info("Activating hardware obstacle avoidance subsystem...")
-        self.avoid_client.SwitchSet(True)
-        self.avoid_client.UseRemoteCommandFromApi(True)
+        if not self.is_offline and SDK_AVAILABLE:
+            # Init sport client API
+            self.sport_client = SportClient()
+            self.sport_client.SetTimeout(10.0)
+            self.sport_client.Init()
+
+            # Init obstacle avoidance client
+            self.avoid_client = ObstaclesAvoidClient()
+            self.avoid_client.SetTimeout(10.0)
+            self.avoid_client.Init()
+            
+            self.get_logger().info("Activating hardware obstacle avoidance subsystem...")
+            self.avoid_client.SwitchSet(True)
+            self.avoid_client.UseRemoteCommandFromApi(True)
+        else:
+            self.get_logger().warn("OFFLINE MODE: Hardware clients bypassed. Simulating velocity commands.")
 
         self.path_sub = self.create_subscription(Path, self.path_topic, self.path_callback, 10)
         self.slam_sub = self.create_subscription(Path, self.slam_topic, self.slam_callback, 10)
@@ -82,7 +97,6 @@ class PathExecutor(Node):
         self.keyboard_thread.start()
 
     def keyboard_listener(self):
-        """Monitors terminal input for the 'P' key without blocking execution loop."""
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
@@ -152,7 +166,11 @@ class PathExecutor(Node):
         distance = math.hypot(error_x, error_y)
 
         if distance <= self.position_tolerance:
-            self.avoid_client.Move(0.0, 0.0, 0.0)
+            if not self.is_offline:
+                self.avoid_client.Move(0.0, 0.0, 0.0)
+            else:
+                self.get_logger().info("Target reached in offline mode.", throttle_duration_sec=2.0)
+                
             self.prev_vx, self.prev_vy, self.prev_yaw_rate = 0.0, 0.0, 0.0
             with self.path_lock:
                 self.last_reached_target = self.active_target
@@ -190,14 +208,22 @@ class PathExecutor(Node):
         self.prev_vy = vy
         self.prev_yaw_rate = yaw_rate
 
-        self.avoid_client.Move(vx, vy, yaw_rate)
+        if not self.is_offline:
+            self.avoid_client.Move(vx, vy, yaw_rate)
+        else:
+            pass
 
     def shutdown_clients(self):
-        """Safely releases control APIs and halts the robot using the avoidance client context."""
+        """Safely releases control APIs and halts the robot."""
+        if self.is_offline:
+            self.get_logger().info("Offline mode: Skipping hardware shutdown sequence.")
+            return
+            
         self.get_logger().info("Releasing remote API control and halting...")
-        self.avoid_client.Move(0.0, 0.0, 0.0)
-        self.avoid_client.UseRemoteCommandFromApi(False)
-        self.avoid_client.SwitchSet(False)
+        if SDK_AVAILABLE:
+            self.avoid_client.Move(0.0, 0.0, 0.0)
+            self.avoid_client.UseRemoteCommandFromApi(False)
+            self.avoid_client.SwitchSet(False)
 
     @staticmethod
     def quaternion_to_yaw(x, y, z, w):
@@ -209,13 +235,21 @@ class PathExecutor(Node):
 
 
 def main(args=None):
-    network_interface = os.environ.get('NETWORK_INTERFACE', 'enx00133b9a06ef')
-    
-    print(f"[PathExecutor] Initializing Unitree SDK on interface: {network_interface}")
-    ChannelFactoryInitialize(0, network_interface)
+    network_interface = os.environ.get('NETWORK_INTERFACE', 'offline')
+    is_offline = (network_interface.lower() == 'offline')
+
+    if not is_offline:
+        if SDK_AVAILABLE:
+            print(f"[PathExecutor] Initializing Unitree SDK on interface: {network_interface}")
+            ChannelFactoryInitialize(0, network_interface)
+        else:
+            print("[PathExecutor] FATAL: Not in offline mode, but Unitree SDK is not installed. Forcing offline mode.")
+            is_offline = True
+    else:
+        print("[PathExecutor] NETWORK_INTERFACE set to 'offline'. Running in simulation mode.")
 
     rclpy.init(args=args)
-    node = PathExecutor()
+    node = PathExecutor(is_offline=is_offline)
 
     try:
         rclpy.spin(node)
