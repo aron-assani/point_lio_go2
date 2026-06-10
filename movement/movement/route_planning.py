@@ -1,10 +1,12 @@
 import math
+import sys
+import os
 
 import rclpy
 from rclpy.node import Node
-
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
+from std_msgs.msg import Empty
 
 
 class StraightLineMovement(Node):
@@ -31,6 +33,13 @@ class StraightLineMovement(Node):
 
         self.path_pub = self.create_publisher(Path, self.plan_topic, 10)
         self.path_sub = self.create_subscription(Path, self.slam_topic, self.slam_callback, 10)
+        
+        # E-stop subscription
+        self.estop_sub = self.create_subscription(Empty, '/emergency_stop', self.estop_callback, 10)
+
+    def estop_callback(self, msg):
+        self.get_logger().error("Emergency Stop received via ROS topic! Halting planning node.")
+        os._exit(0)
 
     def set_target(self, x, y, z):
         self.target_x = float(x)
@@ -74,10 +83,12 @@ class StraightLineMovement(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = StraightLineMovement()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

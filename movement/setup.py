@@ -24,7 +24,8 @@ setup(
     entry_points={
         'console_scripts': [
             'path_executor = movement.execution:main',
-            'straight_line_planner = movement.route_planning:main'
+            'straight_line_planner = movement.route_planning:main',
+            'keyboard_estop = movement.keyboard_estop:main',
         ],
     },
 )

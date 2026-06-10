@@ -2,6 +2,8 @@ docker compose build --build-arg GIT_PAT=ghp_lDxCEDpUAQc4yoTCmI15AgaVAhR9p739xbF
 
 -e NETWORK_INTERFACE=<new interface>
 
+ros2 run movement keyboard_estop
+
 SLAM algoritmus: Point LiDAR Inertial Odometry (Point-LIO) https://github.com/hku-mars/Point-LIO , https://advanced.onlinelibrary.wiley.com/doi/epdf/10.1002/aisy.202200459
 SLAM-ben futó Kálmán szűrő: Iterated Kalman Filters on Manifolds (IkFoM) https://github.com/hku-mars/IKFoM
 Point-LIO ROS2-be átírt változatavan felhasználva https://github.com/dfloreaa/point_lio_ros2

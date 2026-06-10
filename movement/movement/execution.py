@@ -2,13 +2,11 @@ import math
 import sys
 import os
 import threading
-import select
-import termios
-import tty
 import time
 
 import rclpy
 from nav_msgs.msg import Path
+from std_msgs.msg import Empty
 from rclpy.node import Node
 
 try:
@@ -87,37 +85,21 @@ class PathExecutor(Node):
         else:
             self.get_logger().warn("OFFLINE MODE: Hardware clients bypassed. Simulating velocity commands.")
 
+        # Subscriptions
         self.path_sub = self.create_subscription(Path, self.path_topic, self.path_callback, 10)
         self.slam_sub = self.create_subscription(Path, self.slam_topic, self.slam_callback, 10)
+        
+        # Emergency Stop Subscription
+        self.estop_sub = self.create_subscription(Empty, '/emergency_stop', self.estop_callback, 10)
+        
         self.control_timer = self.create_timer(self.control_period, self.control_callback)
 
-        # Keyboard listener
-        self.keyboard_active = True
-        self.keyboard_thread = threading.Thread(target=self.keyboard_listener, daemon=True)
-        self.keyboard_thread.start()
-
-    def keyboard_listener(self):
-        # Prevent crash when launched via ros2 launch (no TTY attached)
-        if not sys.stdin.isatty():
-            self.get_logger().warn("Not running in a terminal. Keyboard kill switch ('P') is disabled.")
-            return
-
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setcbreak(fd)
-            while rclpy.ok() and self.keyboard_active:
-                if select.select([sys.stdin], [], [], 0.1)[0]:
-                    key = sys.stdin.read(1)
-                    if key.lower() == 'p':
-                        self.get_logger().error("Emergency Stop Key 'P' pressed! Halting execution node.")
-                        self.shutdown_clients()
-                        time.sleep(0.2)
-                        os._exit(0)
-        except Exception as e:
-            self.get_logger().error(f"Keyboard listener failed: {e}")
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    def estop_callback(self, msg):
+        """Triggered immediately when an Empty message hits /emergency_stop"""
+        self.get_logger().error("Emergency Stop received via ROS topic! Halting execution node.")
+        self.shutdown_clients()
+        time.sleep(0.2)
+        os._exit(0)
 
     def path_callback(self, msg):
         if not msg.poses:
@@ -257,7 +239,6 @@ def main(args=None):
     try:
         rclpy.spin(node)
     finally:
-        node.keyboard_active = False
         node.shutdown_clients()
         time.sleep(0.2)
         node.destroy_node()
