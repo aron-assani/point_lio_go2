@@ -5,6 +5,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Empty
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 try:
     from unitree_sdk2py.core.channel import ChannelFactoryInitialize
@@ -22,7 +23,7 @@ class Nav2Executor(Node):
         
         self.declare_parameter('max_vx', 0.3)
         self.declare_parameter('max_vy', 0.3)
-        self.declare_parameter('max_yaw_rate', 0.8)
+        self.declare_parameter('max_yaw_rate', 0.5)
 
         self.max_vx = float(self.get_parameter('max_vx').value)
         self.max_vy = float(self.get_parameter('max_vy').value)
@@ -37,42 +38,54 @@ class Nav2Executor(Node):
             self.sport_client.StandUp()
             time.sleep(2.0)
             
-            self.get_logger().info("Engaging FreeWalk mode to unlock velocity tracking...")
-            self.sport_client.FreeWalk()
+            # BalanceStand is generally safer for Move() tracking on Go2 than FreeWalk
+            self.get_logger().info("Engaging Balance mode to unlock velocity tracking...")
+            self.sport_client.BalanceStand()
             time.sleep(1.0)
         else:
             self.get_logger().warn("OFFLINE MODE: Hardware clients bypassed.")
 
-        # Subscribe directly to Nav2's velocity output
-        self.cmd_vel_sub = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
+        # Ensure compatibility with Nav2's BEST_EFFORT cmd_vel publishers
+        qos_profile = QoSProfile(
+            depth=10,
+            reliability=ReliabilityPolicy.BEST_EFFORT
+        )
+
+        self.cmd_vel_sub = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, qos_profile)
         self.estop_sub = self.create_subscription(Empty, '/emergency_stop', self.estop_callback, 10)
         
-        # Watchdog timer: If Nav2 crashes and stops sending cmd_vel, halt the robot.
         self.last_cmd_time = time.time()
+        self.first_message_received = False
         self.watchdog_timer = self.create_timer(0.5, self.watchdog_check)
 
     def estop_callback(self, msg):
-        self.get_logger().error("Emergency Stop received via ROS topic! Halting execution node.")
+        self.get_logger().error("Emergency Stop received! Halting execution node.")
         self.shutdown_clients()
         time.sleep(0.2)
         os._exit(0)
 
     def cmd_vel_callback(self, msg: Twist):
+        if not self.first_message_received:
+            self.get_logger().info(">>> SUCCESS: First /cmd_vel message received from Nav2! <<<")
+            self.first_message_received = True
+
         self.last_cmd_time = time.time()
         
-        # Extract and clamp standard ROS velocities
         vx = max(-self.max_vx, min(self.max_vx, msg.linear.x))
         vy = max(-self.max_vy, min(self.max_vy, msg.linear.y))
         yaw_rate = max(-self.max_yaw_rate, min(self.max_yaw_rate, msg.angular.z))
 
         if not self.is_offline:
+            # Send continuous velocity limits to the hardware
             self.sport_client.Move(vx, vy, yaw_rate)
 
     def watchdog_check(self):
         """Halts the robot if no velocity commands are received for 0.5 seconds."""
         if time.time() - self.last_cmd_time > 0.5:
             if not self.is_offline:
-                self.sport_client.StopMove()
+                # Do NOT use StopMove() here, it breaks the walking state machine.
+                # Instead, command zero velocity to halt safely while ready to resume.
+                self.sport_client.Move(0.0, 0.0, 0.0)
 
     def shutdown_clients(self):
         if self.is_offline:
@@ -90,8 +103,15 @@ def main(args=None):
 
     if not is_offline:
         if SDK_AVAILABLE:
-            print(f"[Nav2Executor] Initializing Unitree SDK on interface: {network_interface}")
-            ChannelFactoryInitialize(0, network_interface)
+            try:
+                print(f"[Nav2Executor] Initializing Unitree SDK on interface: {network_interface}")
+                # Protected against hard crashes if the interface goes down during boot
+                ChannelFactoryInitialize(0, network_interface)
+            except Exception as e:
+                print(f"[Nav2Executor] ERROR: Failed to bind to {network_interface}. Network is down.")
+                print(f"[Nav2Executor] Exception: {e}")
+                print("[Nav2Executor] Falling back to OFFLINE mode to keep ROS node alive.")
+                is_offline = True
         else:
             print("FATAL: Not in offline mode, but Unitree SDK is not installed.")
             is_offline = True
@@ -101,6 +121,8 @@ def main(args=None):
 
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
         node.shutdown_clients()
         time.sleep(0.2)

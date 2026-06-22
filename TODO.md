@@ -4,7 +4,10 @@ NETWORK_INTERFACE=eno2 ros2 launch point_lio mapping_utlidar.launch enable_navig
 
 NETWORK_INTERFACE=offline ros2 launch point_lio mapping_utlidar.launch enable_navigation:=true use_sim_time:=true
 
--e NETWORK_INTERFACE=<new interface>
+-e NETWORK_INTERFACE=<new interface> 
+
+NETWORK_INTERFACE=enx00133b9a06ef ros2 launch point_lio mapping_utlidar.launch enable_navigation:=true enable_optitrack:=false use_sim_time:=false
+
 
 ros2 run movement keyboard_estop
 
