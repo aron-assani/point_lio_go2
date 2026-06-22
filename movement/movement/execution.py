@@ -33,19 +33,10 @@ class Nav2Executor(Node):
             self.sport_client = SportClient()
             self.sport_client.SetTimeout(10.0)
             self.sport_client.Init()
-
-            self.get_logger().info("Initializing robot posture... Standing up.")
-            self.sport_client.StandUp()
-            time.sleep(2.0)
-            
-            # BalanceStand is generally safer for Move() tracking on Go2 than FreeWalk
-            self.get_logger().info("Engaging Balance mode to unlock velocity tracking...")
-            self.sport_client.BalanceStand()
-            time.sleep(1.0)
+            self.get_logger().info("Execution node initialized as a pure velocity bridge. Awaiting /cmd_vel.")
         else:
             self.get_logger().warn("OFFLINE MODE: Hardware clients bypassed.")
 
-        # Ensure compatibility with Nav2's BEST_EFFORT cmd_vel publishers
         qos_profile = QoSProfile(
             depth=10,
             reliability=ReliabilityPolicy.BEST_EFFORT
@@ -55,7 +46,12 @@ class Nav2Executor(Node):
         self.estop_sub = self.create_subscription(Empty, '/emergency_stop', self.estop_callback, 10)
         
         self.last_cmd_time = time.time()
+        self.last_move_time = 0.0
         self.first_message_received = False
+        
+        # Track whether the robot is currently moving to avoid spamming StopMove
+        self.is_moving = False 
+        
         self.watchdog_timer = self.create_timer(0.5, self.watchdog_check)
 
     def estop_callback(self, msg):
@@ -65,36 +61,47 @@ class Nav2Executor(Node):
         os._exit(0)
 
     def cmd_vel_callback(self, msg: Twist):
+        current_time = time.time()
+        self.last_cmd_time = current_time
+
         if not self.first_message_received:
             self.get_logger().info(">>> SUCCESS: First /cmd_vel message received from Nav2! <<<")
             self.first_message_received = True
-
-        self.last_cmd_time = time.time()
         
         vx = max(-self.max_vx, min(self.max_vx, msg.linear.x))
         vy = max(-self.max_vy, min(self.max_vy, msg.linear.y))
         yaw_rate = max(-self.max_yaw_rate, min(self.max_yaw_rate, msg.angular.z))
 
-        if not self.is_offline:
-            # Send continuous velocity limits to the hardware
-            self.sport_client.Move(vx, vy, yaw_rate)
+        # Check if Nav2 is commanding a full stop
+        if abs(vx) < 0.01 and abs(vy) < 0.01 and abs(yaw_rate) < 0.01:
+            if self.is_moving:
+                if not self.is_offline:
+                    self.sport_client.StopMove()
+                self.is_moving = False
+            return
+
+        # RATE LIMITER: Only send Move() commands every 0.5 seconds (2Hz) max
+        if current_time - self.last_move_time >= 0.5:
+            if not self.is_offline:
+                self.sport_client.Move(vx, vy, yaw_rate)
+            self.last_move_time = current_time
+            self.is_moving = True
 
     def watchdog_check(self):
         """Halts the robot if no velocity commands are received for 0.5 seconds."""
         if time.time() - self.last_cmd_time > 0.5:
-            if not self.is_offline:
-                # Do NOT use StopMove() here, it breaks the walking state machine.
-                # Instead, command zero velocity to halt safely while ready to resume.
-                self.sport_client.Move(0.0, 0.0, 0.0)
+            if self.is_moving:
+                if not self.is_offline:
+                    self.sport_client.StopMove()
+                self.is_moving = False
 
     def shutdown_clients(self):
         if self.is_offline:
             return
             
-        self.get_logger().info("Halting robot and standing down...")
+        self.get_logger().info("Execution node shutting down. Sending StopMove()...")
         if SDK_AVAILABLE:
             self.sport_client.StopMove()
-            self.sport_client.StandDown()
 
 
 def main(args=None):
@@ -105,7 +112,6 @@ def main(args=None):
         if SDK_AVAILABLE:
             try:
                 print(f"[Nav2Executor] Initializing Unitree SDK on interface: {network_interface}")
-                # Protected against hard crashes if the interface goes down during boot
                 ChannelFactoryInitialize(0, network_interface)
             except Exception as e:
                 print(f"[Nav2Executor] ERROR: Failed to bind to {network_interface}. Network is down.")
