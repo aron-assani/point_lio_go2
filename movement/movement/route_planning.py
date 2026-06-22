@@ -15,21 +15,19 @@ class StraightLineMovement(Node):
 
         self.declare_parameter('slam_topic', '/robot/path_slam')
         self.declare_parameter('plan_topic', '/robot/path_straight_line')
-        self.declare_parameter('target_x', 0.0)
-        self.declare_parameter('target_y', 0.0)
-        self.declare_parameter('target_z', 0.0)
 
         self.slam_topic = self.get_parameter('slam_topic').value
         self.plan_topic = self.get_parameter('plan_topic').value
 
-        if target_xyz is None:
-            self.target_x = float(self.get_parameter('target_x').value)
-            self.target_y = float(self.get_parameter('target_y').value)
-            self.target_z = float(self.get_parameter('target_z').value)
-        else:
-            self.target_x = float(target_xyz[0])
-            self.target_y = float(target_xyz[1])
-            self.target_z = float(target_xyz[2])
+        # Start dormant. Do not plan until RViz sends a goal.
+        self.has_active_target = False
+        self.target_x = 0.0
+        self.target_y = 0.0
+        self.target_z = 0.0
+
+        if target_xyz is not None:
+            self.set_target(target_xyz[0], target_xyz[1], target_xyz[2])
+            self.has_active_target = True
 
         self.path_pub = self.create_publisher(Path, self.plan_topic, 10)
         self.path_sub = self.create_subscription(Path, self.slam_topic, self.slam_callback, 10)
@@ -44,6 +42,7 @@ class StraightLineMovement(Node):
         """Intercepts interactive target markers placed inside the RViz viewport"""
         self.get_logger().info(f"New target frame accepted from RViz: x={msg.pose.position.x:.3f}, y={msg.pose.position.y:.3f}")
         self.set_target(msg.pose.position.x, msg.pose.position.y, msg.pose.position.z)
+        self.has_active_target = True
 
     def estop_callback(self, msg):
         self.get_logger().error("Emergency Stop received via ROS topic! Halting planning node.")
@@ -84,6 +83,10 @@ class StraightLineMovement(Node):
         return planned_path
 
     def slam_callback(self, msg):
+        # Do not publish a path if no goal has been commanded
+        if not self.has_active_target:
+            return
+            
         current_pose = msg.poses[-1].pose
         self.path_pub.publish(self.plan_straight_line(current_pose, msg.header))
 

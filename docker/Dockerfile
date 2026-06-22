@@ -31,6 +31,9 @@ RUN apt-get update && apt-get install -y \
     ros-humble-pcl-ros \
     ros-humble-pcl-conversions \
     ros-humble-visualization-msgs \
+    ros-humble-navigation2 \
+    ros-humble-nav2-bringup \
+    ros-humble-pointcloud-to-laserscan \
     nano \
     ros-humble-rmw-cyclonedds-cpp \
     ros-humble-rosbag2 \

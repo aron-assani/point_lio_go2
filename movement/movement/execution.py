@@ -1,15 +1,9 @@
-import math
 import sys
 import os
-import threading
-import select
-import termios
-import tty
 import time
-
 import rclpy
-from nav_msgs.msg import Path
 from rclpy.node import Node
+from geometry_msgs.msg import Twist
 from std_msgs.msg import Empty
 
 try:
@@ -20,55 +14,19 @@ except ImportError:
     SDK_AVAILABLE = False
 
 
-class PathExecutor(Node):
+class Nav2Executor(Node):
     def __init__(self, is_offline=False):
-        super().__init__('path_executor')
+        super().__init__('nav2_executor')
         
         self.is_offline = is_offline
-
-        self.declare_parameter('path_topic', '/robot/path_straight_line')
-        self.declare_parameter('slam_topic', '/robot/path_slam')
-        self.declare_parameter('vx_gain', 1.0)
-        self.declare_parameter('vy_gain', 1.0)
-        self.declare_parameter('yaw_gain', 1.5)
-        self.declare_parameter('position_tolerance', 0.05)
-        self.declare_parameter('yaw_tolerance', 0.15)
+        
         self.declare_parameter('max_vx', 0.3)
         self.declare_parameter('max_vy', 0.3)
-        self.declare_parameter('max_yaw_rate', 0.5)
-        self.declare_parameter('control_rate_hz', 20.0)
-        
-        # Ramp params
-        self.declare_parameter('max_linear_accel', 0.4)  # m/s^2
-        self.declare_parameter('max_yaw_accel', 0.8)     # rad/s^2
+        self.declare_parameter('max_yaw_rate', 0.8)
 
-        self.path_topic = self.get_parameter('path_topic').value
-        self.slam_topic = self.get_parameter('slam_topic').value
-        self.vx_gain = float(self.get_parameter('vx_gain').value)
-        self.vy_gain = float(self.get_parameter('vy_gain').value)
-        self.yaw_gain = float(self.get_parameter('yaw_gain').value)
-        self.position_tolerance = float(self.get_parameter('position_tolerance').value)
-        self.yaw_tolerance = float(self.get_parameter('yaw_tolerance').value)
         self.max_vx = float(self.get_parameter('max_vx').value)
         self.max_vy = float(self.get_parameter('max_vy').value)
         self.max_yaw_rate = float(self.get_parameter('max_yaw_rate').value)
-        self.control_period = 1.0 / float(self.get_parameter('control_rate_hz').value)
-        
-        self.max_linear_accel = float(self.get_parameter('max_linear_accel').value)
-        self.max_yaw_accel = float(self.get_parameter('max_yaw_accel').value)
-
-        self.path_lock = threading.Lock()
-        self.active_target = None
-        self.active_yaw = 0.0
-        self.last_reached_target = None
-        self.current_x = 0.0
-        self.current_y = 0.0
-        self.current_z = 0.0
-        self.current_yaw = 0.0
-
-        self.prev_vx = 0.0
-        self.prev_vy = 0.0
-        self.prev_yaw_rate = 0.0
 
         if not self.is_offline and SDK_AVAILABLE:
             self.sport_client = SportClient()
@@ -83,14 +41,15 @@ class PathExecutor(Node):
             self.sport_client.FreeWalk()
             time.sleep(1.0)
         else:
-            self.get_logger().warn("OFFLINE MODE: Hardware clients bypassed. Simulating velocity commands.")
+            self.get_logger().warn("OFFLINE MODE: Hardware clients bypassed.")
 
-        self.path_sub = self.create_subscription(Path, self.path_topic, self.path_callback, 10)
-        self.slam_sub = self.create_subscription(Path, self.slam_topic, self.slam_callback, 10)
-        
+        # Subscribe directly to Nav2's velocity output
+        self.cmd_vel_sub = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
         self.estop_sub = self.create_subscription(Empty, '/emergency_stop', self.estop_callback, 10)
         
-        self.control_timer = self.create_timer(self.control_period, self.control_callback)
+        # Watchdog timer: If Nav2 crashes and stops sending cmd_vel, halt the robot.
+        self.last_cmd_time = time.time()
+        self.watchdog_timer = self.create_timer(0.5, self.watchdog_check)
 
     def estop_callback(self, msg):
         self.get_logger().error("Emergency Stop received via ROS topic! Halting execution node.")
@@ -98,117 +57,31 @@ class PathExecutor(Node):
         time.sleep(0.2)
         os._exit(0)
 
-    def path_callback(self, msg):
-        if not msg.poses:
-            return
-
-        target_pose = msg.poses[-1].pose
-        new_target = (
-            float(target_pose.position.x),
-            float(target_pose.position.y),
-            float(target_pose.position.z),
-        )
-
-        with self.path_lock:
-            if self.last_reached_target == new_target:
-                return
-
-            self.active_target = new_target
-            self.active_yaw = self.quaternion_to_yaw(
-                target_pose.orientation.x,
-                target_pose.orientation.y,
-                target_pose.orientation.z,
-                target_pose.orientation.w,
-            )
-
-    def slam_callback(self, msg):
-        if not msg.poses:
-            return
-
-        pose = msg.poses[-1].pose
-        self.current_x = float(pose.position.x)
-        self.current_y = float(pose.position.y)
-        self.current_z = float(pose.position.z)
-        self.current_yaw = self.quaternion_to_yaw(
-            pose.orientation.x,
-            pose.orientation.y,
-            pose.orientation.z,
-            pose.orientation.w,
-        )
-
-    def control_callback(self):
-        with self.path_lock:
-            target = self.active_target
-            target_yaw = self.active_yaw
-
-        if target is None:
-            self.apply_ramp_and_send(0.0, 0.0, 0.0)
-            return
-
-        error_x = target[0] - self.current_x
-        error_y = target[1] - self.current_y
-        distance = math.hypot(error_x, error_y)
-
-        if distance <= self.position_tolerance:
-            if not self.is_offline:
-                self.sport_client.StopMove()
-            else:
-                self.get_logger().info("Target reached in offline mode.", throttle_duration_sec=2.0)
-                
-            self.prev_vx, self.prev_vy, self.prev_yaw_rate = 0.0, 0.0, 0.0
-            with self.path_lock:
-                self.last_reached_target = self.active_target
-                self.active_target = None
-            return
-
-        cos_yaw = math.cos(self.current_yaw)
-        sin_yaw = math.sin(self.current_yaw)
-        body_x = cos_yaw * error_x + sin_yaw * error_y
-        body_y = -sin_yaw * error_x + cos_yaw * error_y
-
-        target_vx = max(-self.max_vx, min(self.max_vx, self.vx_gain * body_x))
-        target_vy = max(-self.max_vy, min(self.max_vy, self.vy_gain * body_y))
-
-        yaw_error = self.wrap_angle(target_yaw - self.current_yaw)
-        if abs(yaw_error) <= self.yaw_tolerance:
-            target_yaw_rate = 0.0
-        else:
-            target_yaw_rate = max(-self.max_yaw_rate, min(self.max_yaw_rate, self.yaw_gain * yaw_error))
-
-        self.apply_ramp_and_send(target_vx, target_vy, target_yaw_rate)
-
-    def apply_ramp_and_send(self, target_vx, target_vy, target_yaw_rate):
-        max_dv_linear = self.max_linear_accel * self.control_period
-        max_dv_yaw = self.max_yaw_accel * self.control_period
-
-        vx = max(self.prev_vx - max_dv_linear, min(self.prev_vx + max_dv_linear, target_vx))
-        vy = max(self.prev_vy - max_dv_linear, min(self.prev_vy + max_dv_linear, target_vy))
-        yaw_rate = max(self.prev_yaw_rate - max_dv_yaw, min(self.prev_yaw_rate + max_dv_yaw, target_yaw_rate))
-
-        self.prev_vx = vx
-        self.prev_vy = vy
-        self.prev_yaw_rate = yaw_rate
+    def cmd_vel_callback(self, msg: Twist):
+        self.last_cmd_time = time.time()
+        
+        # Extract and clamp standard ROS velocities
+        vx = max(-self.max_vx, min(self.max_vx, msg.linear.x))
+        vy = max(-self.max_vy, min(self.max_vy, msg.linear.y))
+        yaw_rate = max(-self.max_yaw_rate, min(self.max_yaw_rate, msg.angular.z))
 
         if not self.is_offline:
             self.sport_client.Move(vx, vy, yaw_rate)
 
+    def watchdog_check(self):
+        """Halts the robot if no velocity commands are received for 0.5 seconds."""
+        if time.time() - self.last_cmd_time > 0.5:
+            if not self.is_offline:
+                self.sport_client.StopMove()
+
     def shutdown_clients(self):
         if self.is_offline:
-            self.get_logger().info("Offline mode: Skipping hardware shutdown sequence.")
             return
             
-        self.get_logger().info("Releasing remote API control and halting...")
+        self.get_logger().info("Halting robot and standing down...")
         if SDK_AVAILABLE:
             self.sport_client.StopMove()
             self.sport_client.StandDown()
-
-    @staticmethod
-    def quaternion_to_yaw(x, y, z, w):
-        return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-
-    @staticmethod
-    def wrap_angle(angle):
-        return math.atan2(math.sin(angle), math.cos(angle))
 
 
 def main(args=None):
@@ -217,16 +90,14 @@ def main(args=None):
 
     if not is_offline:
         if SDK_AVAILABLE:
-            print(f"[PathExecutor] Initializing Unitree SDK on interface: {network_interface}")
+            print(f"[Nav2Executor] Initializing Unitree SDK on interface: {network_interface}")
             ChannelFactoryInitialize(0, network_interface)
         else:
-            print("[PathExecutor] FATAL: Not in offline mode, but Unitree SDK is not installed. Forcing offline mode.")
+            print("FATAL: Not in offline mode, but Unitree SDK is not installed.")
             is_offline = True
-    else:
-        print("[PathExecutor] NETWORK_INTERFACE set to 'offline'. Running in simulation mode.")
 
     rclpy.init(args=args)
-    node = PathExecutor(is_offline=is_offline)
+    node = Nav2Executor(is_offline=is_offline)
 
     try:
         rclpy.spin(node)

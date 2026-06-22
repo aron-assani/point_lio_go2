@@ -3,6 +3,10 @@
     <arg name="enable_navigation" default="true" />
     <arg name="enable_optitrack" default="false" />
 
+    <include file="$(find-pkg-share movement)/launch/movement.launch.xml">
+        <arg name="enable_navigation" value="$(var enable_navigation)" />
+    </include>
+
     <node pkg="transform_sensors" exec="transform_everything" name="transform_everything" output="screen" />
 
     <node pkg="point_lio" exec="pointlio_mapping" name="laserMapping" output="screen">
@@ -16,9 +20,5 @@
     <node pkg="trajectory_bridge" exec="trajectory_node" name="trajectory_node" output="screen">
         <param name="enable_optitrack" value="$(var enable_optitrack)" />
     </node>
-
-    <include file="$(find-pkg-share movement)/launch/movement.launch.xml">
-        <arg name="enable_navigation" value="$(var enable_navigation)" />
-    </include>
 
 </launch>
