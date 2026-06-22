@@ -1,20 +1,22 @@
 <launch>
     <arg name="enable_navigation" default="false" />
-
-    <group if="$(var enable_navigation)">
+    <arg name="use_sim_time" default="false" /> <group if="$(var enable_navigation)">
         
         <node pkg="pointcloud_to_laserscan" exec="pointcloud_to_laserscan_node" name="pointcloud_to_laserscan">
             <remap from="cloud_in" to="/slam/cloud_body_frame"/>
             <remap from="scan" to="/scan"/>
             <param from="$(find-pkg-share movement)/config/nav2_params.yaml" />
+            <param name="use_sim_time" value="$(var use_sim_time)"/> 
         </node>
 
         <include file="$(find-pkg-share nav2_bringup)/launch/navigation_launch.py">
             <arg name="params_file" value="$(find-pkg-share movement)/config/nav2_params.yaml"/>
-            <arg name="use_sim_time" value="false"/>
+            <arg name="use_sim_time" value="$(var use_sim_time)"/>
         </include>
 
-        <node pkg="movement" exec="path_executor" name="path_executor" output="screen" />
+        <node pkg="movement" exec="path_executor" name="path_executor" output="screen">
+            <param name="use_sim_time" value="$(var use_sim_time)"/>
+        </node>
         
     </group>
 </launch>
