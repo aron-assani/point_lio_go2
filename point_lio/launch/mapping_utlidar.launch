@@ -1,15 +1,12 @@
 <launch>
     <arg name="rviz" default="true" />
-    <arg name="enable_navigation" default="true" />
     <arg name="enable_optitrack" default="false" />
 
     <node pkg="tf2_ros" exec="static_transform_publisher" name="body_link" args="-0.2894, 0.0, 0.0468 0 0 0 aft_mapped body" />
 
     <node pkg="tf2_ros" exec="static_transform_publisher" name="odom_link" args="0 0 0 0 0 0 camera_init odom" />
 
-    <include file="$(find-pkg-share movement)/launch/movement.launch.xml">
-        <arg name="enable_navigation" value="$(var enable_navigation)" />
-    </include>
+    <include file="$(find-pkg-share movement)/launch/movement.launch.xml" />
 
     <node pkg="transform_sensors" exec="transform_everything" name="transform_everything" output="screen" />
 
