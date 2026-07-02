@@ -8,6 +8,8 @@ NETWORK_INTERFACE=offline ros2 launch point_lio mapping_utlidar.launch enable_na
 
 NETWORK_INTERFACE=enx00133b9a06ef ros2 launch point_lio mapping_utlidar.launch enable_navigation:=true enable_optitrack:=false use_sim_time:=false
 
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: 'camera_init'}, pose: {position: {x: 1.0, y: 0.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
+
 
 ros2 run movement keyboard_estop
 
