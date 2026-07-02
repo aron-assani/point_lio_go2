@@ -18,7 +18,7 @@ LiDAR pózt beállító segédprogram: transform_sensors https://github.com/jizh
 "Body" pont pályáját és mocap pályát megjelenítő segédprogram: trajectory_bridge
 Rviz-ben a koordináta-rendszer a LiDAR origóját mutatja
 
-+-2cm pontossággal van a LiDar (Unitree L1) reklámozva
++-2cm pontossággal van a LiDAR (Unitree L1) reklámozva
 
 Mérések több különböző kezdőpontból indultak.
 Pontosság csökkent a kezdőpontból való távolság szerint

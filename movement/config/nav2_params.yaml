@@ -4,15 +4,14 @@ pointcloud_to_laserscan:
   ros__parameters:
     use_sim_time: false
     target_frame: "aft_mapped"
-    transform_tolerance: 0.01
+    transform_tolerance: 0.5
     min_height: 0.15
     max_height: 0.6
     angle_min: -3.1415
     angle_max: 3.1415
     angle_increment: 0.0087
     scan_time: 0.1
-    # Large enough so the robot ignores its own chassis in the raw scan
-    range_min: 0.60
+    range_min: 0.65
     range_max: 10.0
     use_inf: true
 
@@ -24,12 +23,12 @@ bt_navigator:
   ros__parameters:
     use_sim_time: false
     global_frame: camera_init
-    # Nav2 tracks the mathematical center of the robot
     robot_base_frame: body_center
 
 behavior_server:
   ros__parameters:
     use_sim_time: false
+    robot_base_frame: body_center
 
 planner_server:
   ros__parameters:
@@ -39,61 +38,55 @@ planner_server:
 velocity_smoother:
   ros__parameters:
     use_sim_time: false
-    odom_topic: "/slam/odometry"
+    odom_topic: "/robot/pose_estimate"
+    robot_base_frame: "body_center"
 
 controller_server:
   ros__parameters:
     use_sim_time: false
     controller_frequency: 20.0
-    odom_topic: "/slam/odometry"
+    odom_topic: "/robot/pose_estimate"
+    robot_base_frame: "body_center"
     max_vel_x: 0.3
-    max_vel_y: 0.3
+    max_vel_y: 0.0
     max_vel_theta: 0.5
+    transform_tolerance: 0.5
     controller_plugins: ["FollowPath"]
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: True
-      # Allow slight reverse speeds for tight maneuvers
-      min_vel_x: -0.2
-      min_vel_y: -0.2
+      min_vel_x: 0.0
+      min_vel_y: 0.0
       max_vel_x: 0.3
-      max_vel_y: 0.3
+      max_vel_y: 0.0
       max_vel_theta: 0.5
-      # FORCE MINIMUM MOVEMENT to avoid the 0 trajectories trap
       min_speed_xy: 0.05
       max_speed_xy: 0.3
       min_speed_theta: 0.1
       acc_lim_x: 1.0
       acc_lim_y: 1.0
       acc_lim_theta: 1.5
-      xy_goal_tolerance: 0.01
-      yaw_goal_tolerance: 0.01
+      xy_goal_tolerance: 0.25
+      yaw_goal_tolerance: 0.25
       stateful: True
-      transform_tolerance: 0.01
-      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      transform_tolerance: 0.5
+      critics: ["Oscillation", "BaseObstacle", "PathDist", "GoalDist"]
       BaseObstacle.scale: 0.02
-      PathAlign.scale: 32.0
-      GoalAlign.scale: 24.0
       PathDist.scale: 32.0
       GoalDist.scale: 24.0
-      RotateToGoal.scale: 32.0
       Oscillation.scale: 1.0
 
-# --- THE GLOBAL COSTMAP ---
 global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: false
       global_frame: camera_init
-      # Nav2 tracks the mathematical center of the robot
       robot_base_frame: body_center
-      # Rectangular footprint matching the Go2 (Length: 60cm, Width: 30cm)
-      footprint: "[ [0.05, 0.05], [0.05, -0.05], [-0.05, -0.05], [-0.05, 0.05] ]"
+      footprint: "[ [0.30, 0.15], [0.30, -0.15], [-0.30, -0.15], [-0.30, 0.15] ]"
       resolution: 0.05
       rolling_window: true
-      width: 20
-      height: 20
-      # Removed static_layer because we are doing live SLAM
+      width: 40
+      height: 40
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
@@ -107,19 +100,16 @@ global_costmap:
           data_type: "LaserScan"
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        cost_scaling_factor: 5.0
+        inflation_radius: 0.45
 
-# --- THE LOCAL COSTMAP ---
 local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: false
       global_frame: camera_init
-      # Nav2 tracks the mathematical center of the robot
       robot_base_frame: body_center
-      # Rectangular footprint matching the Go2 (Length: 60cm, Width: 30cm)
-      footprint: "[ [0.05, 0.05], [0.05, -0.05], [-0.05, -0.05], [-0.05, 0.05] ]"
+      footprint: "[ [0.30, 0.15], [0.30, -0.15], [-0.30, -0.15], [-0.30, 0.15] ]"
       resolution: 0.05
       rolling_window: true
       width: 5
@@ -137,5 +127,5 @@ local_costmap:
           data_type: "LaserScan"
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        cost_scaling_factor: 5.0
+        inflation_radius: 0.45
