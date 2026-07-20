@@ -2,8 +2,8 @@
     <arg name="rviz" default="true" />
     <arg name="enable_optitrack" default="false" />
 
-    <node pkg="tf2_ros" exec="static_transform_publisher" name="body_link" args="-0.2894, 0.0, 0.0468 0 0 0 aft_mapped body" />
-
+    <node pkg="tf2_ros" exec="static_transform_publisher" name="body_link" args="-0.2894 0.0 0.0468 0 0 0 aft_mapped body_center" />
+    
     <node pkg="tf2_ros" exec="static_transform_publisher" name="odom_link" args="0 0 0 0 0 0 camera_init odom" />
 
     <include file="$(find-pkg-share movement)/launch/movement.launch.xml" />
@@ -13,13 +13,12 @@
     <node pkg="point_lio" exec="pointlio_mapping" name="laserMapping" output="screen">
         <param from="$(find-pkg-share point_lio)/config/utlidar.yaml" />
     </node>
-
-    <group if="$(var rviz)">
-        <node launch-prefix="nice" pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share point_lio)/rviz_cfg/loam_livox.rviz"/>
-    </group>
-
+    
     <node pkg="trajectory_bridge" exec="trajectory_node" name="trajectory_node" output="screen">
         <param name="enable_optitrack" value="$(var enable_optitrack)" />
     </node>
 
+    <group if="$(var rviz)">
+        <node launch-prefix="nice" pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share point_lio)/rviz_cfg/loam_livox.rviz"/>
+    </group>
 </launch>
