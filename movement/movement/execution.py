@@ -65,7 +65,7 @@ class Nav2Executor(Node):
                 self.is_moving = False
             return
 
-        # 20Hz update rate matches standard ROS 2 controller frequencies
+        # 20Hz update
         if time.time() - self.last_move_time >= 0.05:
             if self.sport_client:
                 self.sport_client.Move(vx, vy, yaw_rate)
@@ -73,7 +73,7 @@ class Nav2Executor(Node):
             self.is_moving = True
 
     def watchdog_check(self):
-        # Stop moving if planner stops sending commands (Safety feature)
+        # Stop moving if planner stops sending commands
         if time.time() - self.last_cmd_time > 0.5 and self.is_moving:
             if self.sport_client: self.sport_client.StopMove()
             self.is_moving = False

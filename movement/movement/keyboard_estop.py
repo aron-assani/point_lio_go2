@@ -11,14 +11,14 @@ class KeyboardEStop(Node):
         super().__init__('keyboard_estop')
         self.publisher_ = self.create_publisher(Empty, '/emergency_stop', 10)
         
-        # Safety check: Prevent running via ros2 launch
+        # Prevent running via ros2 launch
         if not sys.stdin.isatty():
             self.get_logger().fatal("This node MUST be run in a dedicated terminal")
             sys.exit(1)
 
         self.get_logger().info("=====================================")
         self.get_logger().info(" EMERGENCY STOP NODE ACTIVE")
-        self.get_logger().info(" Press 'P' at any time to halt robot.")
+        self.get_logger().info(" Press 'P' to halt robot.")
         self.get_logger().info("=====================================")
 
     def run_monitor(self):
@@ -36,7 +36,7 @@ class KeyboardEStop(Node):
                             self.publisher_.publish(msg)
                             
         except KeyboardInterrupt:
-            pass # Handle Ctrl+C cleanly
+            pass
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 

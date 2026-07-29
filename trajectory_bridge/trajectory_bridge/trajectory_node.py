@@ -19,7 +19,7 @@ class TrajectoryEvaluator(Node):
     def __init__(self, target_body_name='go2'):
         super().__init__('trajectory_evaluator_node')
 
-        # --- CONFIGURATION ---
+        # Config
         self.optitrack_enabled = bool(self.declare_parameter('enable_optitrack', True).value)
         self.slam_odom_topic = '/slam/odometry'
         self.body_pose_topic = '/robot/pose_estimate'
@@ -33,7 +33,7 @@ class TrajectoryEvaluator(Node):
         # Sensor to Body Center Offset
         self.local_offset = np.array([-0.2894, 0.0, 0.0468])
 
-        # State Machine Variables
+        # State
         self.start_time = None
         self.slam_ready = False
         self.mocap_aligned = False
@@ -44,11 +44,10 @@ class TrajectoryEvaluator(Node):
         self.mocap_initial_pos = None
         self.mocap_initial_rot_inv = None
 
-        # File Pointers
+        # File handles
         self.slam_file = None
         self.mocap_file = None
 
-        # Publishers & Subscribers
         self.odom_sub = self.create_subscription(
             Odometry, 
             self.slam_odom_topic, 
@@ -68,7 +67,7 @@ class TrajectoryEvaluator(Node):
         self.mocap_thread = None
         self.is_running = True
 
-        # MoCap Connection
+        # MoCap connection
         if not self.optitrack_enabled:
             self.get_logger().info('OptiTrack is disabled by launch argument. Running in SLAM-only mode.')
         elif motioncapture is None:
@@ -132,7 +131,7 @@ class TrajectoryEvaluator(Node):
 
         elapsed = current_ros_time - self.start_time
 
-        # 1. Transform SLAM to Body Center
+        # 1. Transform SLAM to body center
         pos_sensor = np.array([
             msg.pose.pose.position.x,
             msg.pose.pose.position.y,
@@ -149,7 +148,7 @@ class TrajectoryEvaluator(Node):
         global_offset = rot_sensor.apply(self.local_offset)
         pos_body = pos_sensor + global_offset
 
-        # 2. Publish Body Pose in SLAM frame.
+        # 2. Publish body pose in SLAM frame
         body_pose = Odometry()
         body_pose.header.stamp = msg.header.stamp
         body_pose.header.frame_id = self.fixed_frame
@@ -186,7 +185,7 @@ class TrajectoryEvaluator(Node):
                 self.init_logging_files()
                 self.get_logger().info('SLAM pose locked. SLAM-only mode active.')
 
-        # 4. Log SLAM data after SLAM is ready.
+        # 4. Log SLAM data after SLAM is ready
         if self.slam_ready and self.slam_file and not self.slam_file.closed:
             t_slam = msg.header.stamp.sec + (msg.header.stamp.nanosec * 1e-9)
             line = f"{t_slam:.6f} {pos_body[0]:.6f} {pos_body[1]:.6f} {pos_body[2]:.6f} {quat_sensor[0]:.6f} {quat_sensor[1]:.6f} {quat_sensor[2]:.6f} {quat_sensor[3]:.6f}\n"
@@ -197,7 +196,6 @@ class TrajectoryEvaluator(Node):
         """Dedicated thread to safely block on OptiTrack frames without halting ROS."""
         while rclpy.ok() and self.is_running:
             try:
-                # Safely block here
                 self.mocap.waitForNextFrame()
                 
                 if not self.slam_ready:
@@ -221,7 +219,7 @@ class TrajectoryEvaluator(Node):
                     self.mocap_aligned = True
                     self.get_logger().info('OptiTrack aligned to SLAM frame. Publishing mocap trajectory.')
 
-                # 2. Align Data
+                # 2. Align data
                 pos_zero = self.mocap_initial_rot_inv.apply(pos_raw - self.mocap_initial_pos)
                 rot_zero = self.mocap_initial_rot_inv * rot_raw
                 
@@ -229,7 +227,7 @@ class TrajectoryEvaluator(Node):
                 rot_aligned = self.slam_align_rot * rot_zero
                 quat_aligned = rot_aligned.as_quat()
 
-                # 3. Publish Mocap Path
+                # 3. Publish MoCap path
                 pose = PoseStamped()
                 pose.header.stamp = now_msg
                 pose.header.frame_id = self.fixed_frame
@@ -247,7 +245,7 @@ class TrajectoryEvaluator(Node):
                     self.mocap_path_msg.poses.pop(0)
                 self.mocap_path_pub.publish(self.mocap_path_msg)
 
-                # 4. Log Mocap Data
+                # 4. Log
                 if self.mocap_aligned and self.mocap_file and not self.mocap_file.closed:
                     line = f"{t_mocap:.6f} {pos_aligned[0]:.6f} {pos_aligned[1]:.6f} {pos_aligned[2]:.6f} {quat_aligned[0]:.6f} {quat_aligned[1]:.6f} {quat_aligned[2]:.6f} {quat_aligned[3]:.6f}\n"
                     self.mocap_file.write(line)

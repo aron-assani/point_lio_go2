@@ -1,22 +1,11 @@
-ARG NETWORK_INTERFACE=enx2887ba59bf0a
-ARG GIT_PAT=""
-ARG POINT_LIO_REPO="https://github.com/aron-assani/point_lio_go2.git"
-
-# Builder stage: clone the private repo using the provided PAT (if any)
 FROM alpine/git:latest AS gitclone
-ARG GIT_PAT
-ARG POINT_LIO_REPO
 WORKDIR /src
-RUN if [ -n "$GIT_PAT" ]; then \
-      git clone https://$GIT_PAT@github.com/aron-assani/point_lio_go2.git point_lio; \
-    else \
-      git clone $POINT_LIO_REPO point_lio; \
-    fi
 
-# Final image
+RUN git clone "https://github.com/aron-assani/point_lio_go2.git" point_lio 
+
+# Image
 FROM osrf/ros:humble-desktop
 
-ARG NETWORK_INTERFACE
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_WS=/root/ros2_ws
 
@@ -46,6 +35,7 @@ RUN apt-get update && apt-get install -y \
 RUN pip3 install "numpy>=2.0.0" "scipy>=1.14.0" motioncapture pyyaml   
 
 # CycloneDDS configuration
+ARG NETWORK_INTERFACE=enx2887ba59bf0a
 RUN cat <<EOF > /root/cyclonedds.xml
 <?xml version="1.0" encoding="UTF-8" ?>
 <CycloneDDS xmlns="https://cdds.io/config" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
@@ -64,7 +54,6 @@ EOF
 RUN mkdir -p ${ROS_WS}/src
 WORKDIR ${ROS_WS}
 
-# Copy the repo from the builder stage
 COPY --from=gitclone /src/point_lio ${ROS_WS}/src/point_lio
 
 # Clone unilidar_sdk2 repository
@@ -74,7 +63,7 @@ RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build"
 
 # Install unitree_sdk2_python from source
 RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git src/unitree_sdk2_python && \
-    /bin/bash -c "source /opt/ros/humble/setup.bash && cd src/unitree_sdk2_python && pip3 install -e ."
+    /bin/bash -c "source /opt/ros/humble/setup.bash && cd src/unitree_sdk2_python && pip3 install ."
 
 RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build"
 

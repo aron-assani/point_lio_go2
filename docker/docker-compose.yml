@@ -5,16 +5,11 @@ services:
       context: .
       args:
         NETWORK_INTERFACE: ${NETWORK_INTERFACE}
-        GIT_PAT: ${GIT_PAT}
     network_mode: host
-    ipc: host
-    privileged: true
     tty: true       
     stdin_open: true
-    volumes:
-      - /dev:/dev
-      - /tmp/.X11-unix:/tmp/.X11-unix
     environment:
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
-    command: /bin/bash
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix

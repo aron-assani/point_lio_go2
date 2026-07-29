@@ -20,9 +20,8 @@ class OfflineTrajectoryEvaluator(Node):
         self.body_pose_topic = '/robot/pose_estimate'
         self.slam_path_topic = '/robot/path_slam'
         
-        # FIXED: Split the read and write topics to prevent feedback loops
-        self.mocap_ref_topic = '/mocap_path'        # Input: Raw data from rosbag
-        self.mocap_path_topic = '/robot/path_mocap' # Output: Aligned data for RViz
+        self.mocap_ref_topic = '/mocap_path'        # raw data from rosbag
+        self.mocap_path_topic = '/robot/path_mocap' # aligned data for RViz
         
         self.fixed_frame = 'camera_init'
         self.max_poses = 5000

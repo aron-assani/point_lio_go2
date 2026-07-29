@@ -46,12 +46,10 @@ controller_server:
       min_vel_theta: -0.5
       max_vel_theta: 0.5
       
-      # Minimum speeds set to 0.0 to prevent sample culling
       min_speed_xy: 0.0
       min_speed_theta: 0.0
       max_speed_xy: 0.3
       
-      # High acceleration to ensure full evaluation
       acc_lim_x: 3.0
       acc_lim_y: 0.0
       acc_lim_theta: 3.5
@@ -62,7 +60,7 @@ controller_server:
       
       stateful: True
       
-      # Critics configuration (Alignment critics removed for stability)
+      # Critics configuration
       critics: ["Oscillation", "BaseObstacle", "PathDist", "GoalDist"]
       BaseObstacle.scale: 0.02
       PathDist.scale: 32.0

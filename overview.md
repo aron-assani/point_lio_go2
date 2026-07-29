@@ -40,51 +40,68 @@ $$p_{w} = R \, p_s^{(b)} + p$$
 Adott a térkép egy lokális síkfelülete, amelynek normálvektora $n$, síkállandója $d$ (a sík egyenlete $n^T x + d = 0$). Ekkor a pont-sík távolsági (reziduális) hiba:
 $$r = n^T p_w + d$$
 
-Az iterált Kálmán-szűrős (IKF) frissítéshez az $r$ reziduális hiba állapotperturbációkra (orientáció és pozíció) vonatkozó Jacobi-mátrixait használjuk. Egy kis $\delta\phi$ testkoordináta-rendszerbeli orientációs hiba esetén a perturbált forgást az $\tilde{R} = R \exp([\delta\phi]_{\times}) \approx R(I + [\delta\phi]_{\times})$ képlet írja le. Az antiszimmetrikus szorzás tulajdonságát ($[a]_\times b = -[b]_\times a$) kihasználva a reziduális hiba analitikus Jacobi-mátrixai a következők:
+Az iterált Kálmán-szűrős (IKF) frissítéshez az $r$ állapotperturbációkra (orientáció és pozíció) vonatkozó Jacobi-mátrixai vannak felhasználva. Egy kis $\delta\phi$ testkoordináta-rendszerbeli orientációs hiba esetén a perturbált forgást az $\tilde{R} = R \exp([\delta\phi]_{\times}) \approx R(I + [\delta\phi]_{\times})$ képlet írja le. Az antiszimmetrikus szorzás tulajdonságát ($[a]_\times b = -[b]_\times a$) kihasználva a reziduális hiba analitikus Jacobi-mátrixának nem nulla elemei:
 $$\frac{\partial r}{\partial \delta \phi} = -n^T R [p_s^{(b)}]_{\times}, \quad \frac{\partial r}{\partial p} = n^T$$
 
 ### 4. Adathozzarendelés és inkrementális kd-fa (ikd-Tree)
 Az implementáció egy inkrementális kd-fát (`ikd-Tree`) használ a térkép lekérdezésére, hogy megkeresse a $k = \text{NUM\_MATCH\_POINTS} = 5$ legközelebbi szomszédot. A kód minden egyes vizsgált ponthoz megkísérel illeszteni egy síkot az illesztett pontok alapján, a lineáris legkisebb négyzetek módszerével. Ha az illesztési hiba minden elemre kisebb, mint a `mapping.plane_thr`, a rendszer érvényes mérésként elfogadja.
 
-Az $\{x_i\}_{i=1}^k$ illesztett pontok alapján az algoritmus egy $A n' = b$ alakú lineáris egyenletrendszert old meg (ahol a $b = -1$ vektor), hogy visszanyerje a normált síkegyütthatókat. Kis $k$ érték esetén ez számításigény szempontjából sokkal hatékonyabb alternatíva a teljes főkomponens-analízissel (PCA) szemben.
+Az $\{x_i\}_{i=1}^k$ illesztett pontok alapján az algoritmus egy $A n' = b$ alakú lineáris egyenletrendszert old meg (ahol a $b = -1$ vektor), hogy visszanyerje a normált síkegyütthatókat. Kis $k$ érték esetén hatékony.
 
-### 5. IKFoM: Iterated Kalman Filter on Manifolds (Iterált Kálmán-szűrő sokaságokon)
-Az alkalmazott szűrő egy iterált kiterjesztett Kálmán-szűrő (IEKF), amelyet sokaságokon (például orientáció esetén az $SO(3)$ csoporton) értelmezett állapotokhoz igazítottak. Főbb jellemzők:
-- Lokális térképezést (paraméterezést) használ az orientációhoz (pl. hibarotációk az $\mathbb{R}^3$ térben) a Gauss-eloszlású kovariancia megőrzése érdekében.
-- **Predikciós lépés (Predict):** Integrálja az IMU méréseket, és a folyamatzaj-modellek segítségével vezeti a kovarianciát.
-- **Korrekciós lépés (Update):** Linearizálja a pontmérések reziduális hibáit az aktuális állapot körül, majd iteratív korrekciót hajt végre. Az iteráció jelentősen javítja a konvergenciát a forgatásokból eredő nagyobb nemlinearitások esetén.
+### 5. IKFoM: Iterated Kalman Filter on Manifolds
+A rendszer egy nem-euklideszi sokaságokra (manifolds) általánosított iterált kiterjesztett Kálmán-szűrőt (IEKF) alkalmaz, amely kiküszöböli a 3D-s forgások ($SO(3)$) lineáris kezeléséből eredő topológiai torzulásokat.
+
+- **Lie-csoportos paraméterezés ($\boxplus$ / $\boxminus$ operátorok):** A forgásmátrixok ortogonalitásának megőrzése érdekében az állapotot és az érintőteret az alábbi operátorok kötik össze:
+  - $\boxplus$: $\delta x \in \mathbb{R}^3$ mellett $x \boxplus \delta x = x \exp([\delta x]_\times) \in SO(3)$
+  - $\boxminus$: $x_1, x_2 \in SO(3)$ mellett $x_2 \boxminus x_1 = \log\left(x_1^{-1} x_2\right)^\vee = \log\left(x_1^T x_2\right)^\vee \in \mathbb{R}^3$
+- **Propagáció:** Az IMU-méréseket vezérlőbemenetként integrálja a sokaságon, miközben a kovarianciát a hibaállapot ($F_x$) és a folyamatzaj ($F_w$) Jacobi-mátrixaival propagálja: $P_{k+1|k} = F_x P_{k|k-1} F_x^T + F_w Q F_w^T$.
+- **Iterált korrekció:** A LiDAR-mérések (10–20 Hz) feldolgozásakor egy belső hurokban addig számolja újra a pont-sík reziduális hiba $H$ Jacobi-mátrixát a folyamatosan frissülő állapotbecslés körül, amíg a módosítás a konvergencia-küszöb alá nem csökken ($\|\Delta x_j\| < \varepsilon$). Ez hivatott megelőzni a szűrő szétesését gyors, nemlineáris forgásoknál.
 
 ### 6. Időbélyegek kezelése és szinkronizáció
-A pontos állapotpropagációhoz elengedhetetlen az IMU és a LiDAR mérések időbélyegeinek szinkronizációja. A tároló elvárja, hogy a `PointCloud2` üzenet **pontokhoz rendelt egyedi időbélyegeket (per-point timestamps)** tartalmazzon. A transzformációs node kiszámít egy egyszeri időeltolódást:
+A pontos állapotpropagációhoz az IMU és a LiDAR mérések időbélyegei szinkronizálva vannak. A `PointCloud2` üzenetnek pontokhoz rendelt egyedi időbélyegeket (per-point timestamps) kell tartalmaznia. A transzformációs node kiszámít egy egyszeri időeltolódást:
 $$\text{offset} = t_{now} - t_{msg.header.stamp}$$
-majd a beérkező üzeneteket `stamp + offset` időbélyeggel továbbítja (republish), hogy azokat a lokális ROS rendszerórával szinkronizálja. Ez egy gyakorlatias megoldás olyan hardvereszközök kezelésére, amelyek nem rendelkeznek hardveresen szinkronizált belső órával.
+majd a beérkező üzeneteket `stamp + offset` időbélyeggel továbbítja (republish), és a lokális ROS rendszerórával szinkronizálja.
 
-### 7. transform_sensors — Kalibrációs korrekciók
-**Cél:** A külső geometriai transzformációk (rotáció/transzláció) alkalmazása, az IMU nullpont-eltolódásának és vetítésének javítása, valamint a pontfelhő szűrése az állapotbecslőbe történő továbbítás előtt.
-- **Rotáció alkalmazása:** Adott egy `body2cloud` transzformáció $R_{bc}$ rotációs mátrixszal és $t_{bc}$ transzlációs vektorral; egy szenzorban mért $p_s$ pont az alábbi módon kerül a testkoordináta-rendszerbe:
-  $$p_b = R_{bc} p_s + t_{bc}$$
+### 7. transform_sensors — kalibrációs korrekciók és pontszűrés
+- **Pontfelhő transzformáció:**
+  A szenzor koordináta-rendszerében mért $p_s$ pontokat a `body2cloud` rotációs mátrix ($R_{bc}$) és transzlációs vektor ($t_{bc}$) átalakítja a robot testkoordináta-rendszerébe, majd a Z-tengelyen korrigálja a kamera/szenzor magassági eltolásával (`cam_offset` $= 0.046825\text{ m}$): (ennek most épp sok értelmét nem látom)
+  $$p_b = R_{bc} \, p_s + t_{bc} - \begin{bmatrix} 0 \\ 0 \\ \text{cam\_offset} \end{bmatrix}$$
+  A transzformáció után egy 3D-s befoglaló téglatest (`is_in_filter_box`) segítségével az algoritmus eldobja a robot saját körvonalán belül eső pontokat.
 
-- **IMU torzítás (bias) korrekciója és vetítése:**
-  A mért $\omega_m$ szögsebességen a rendszer előjelváltást hajt végre, kivonja a statikus torzítást, majd elforgatja egy kis mechanikai dőlésszög ($\theta = 15.1^\circ$) mentén:
-  $$x_\omega = \cos\theta \cdot \omega_x - \sin\theta \cdot \omega_z$$
-  $$z_\omega = \sin\theta \cdot \omega_x + \cos\theta \cdot \omega_z$$
-  Ezután az alábbi módosítások lépnek életbe:
-  $$x_\omega \leftarrow x_\omega - \text{ang\_bias}_x$$
-  $$x_\omega \leftarrow x_\omega + \text{ang\_z2x\_proj} \cdot z_\omega$$
-  A lineáris gyorsulásmérések feldolgozása ehhez hasonlóan történik (dőlésszöges forgatás, majd az `acc_bias_*` értékek kivonása).
+- **IMU előjelváltás, dőléskompenzáció:**
+  A bal- és jobbkezes koordináta-rendszeri eltérés miatt a nyers szögsebesség ($\omega_m$) és lineáris gyorsulás ($a_m$) méréseken az Y és Z tengelyeken előjel-inverzió van végrehajtva:
+  $$\omega_x \leftarrow \omega_x, \quad \omega_y \leftarrow -\omega_y, \quad \omega_z \leftarrow -\omega_z$$
+  $$(a_x \leftarrow a_x, \quad a_y \leftarrow -a_y, \quad a_z \leftarrow -a_z)$$
+  Ezt követően a szenzor $\theta = 15.1^\circ$-os dőlését mindkét méréstípusra egy Y-tengely körüli forgatással van kompenzálva:
+  $$x' = \cos\theta \cdot x - \sin\theta \cdot z$$
+  $$y' = y$$
+  $$z' = \sin\theta \cdot x + \cos\theta \cdot z$$
 
-### 8. Nav2 útvonaltervezés
-Mivel a rendszer előre mentett statikus térkép nélkül dolgozik, a Nav2 stacket dinamikus, gördülőablakos módra és szigorúan korlátozott kinematikára szabtuk.
+- **Torzítások (bias és projection) korrekciója:**
+  A forgatás után `bias` kivonása. A szögsebesség esetén a tengelyek közötti keresztirányú torzulás is korrigálása a Z-tengely arányában. A lineáris gyorsulásra ez a vetítési korrekció nem vonatkozik:
+  $$\omega_{\text{korr}} = \begin{bmatrix} \omega'_x - \text{ang\_bias}_x + \text{ang\_z2x\_proj} \cdot (\omega'_z - \text{ang\_bias}_z) \\ \omega'_y - \text{ang\_bias}_y + \text{ang\_z2y\_proj} \cdot (\omega'_z - \text{ang\_bias}_z) \\ \omega'_z - \text{ang\_bias}_z \end{bmatrix}$$
+  $$a_{\text{korr}} = \begin{bmatrix} a'_x - \text{acc\_bias}_x \\ a'_y - \text{acc\_bias}_y \\ a'_z - \text{acc\_bias}_z \end{bmatrix}$$
 
-- **Miért bukik el egy egyedi útvonaltervező a Nav2-vel szemben?** Egy egyszerű saját szkript (pl. A* + Pure Pursuit) valós 3D LiDAR-os fizikai környezetben öt konkrét korlát miatt válik azonnal használhatatlanná:
-  - *3D sugárkövetés (Raycasting) hiánya:* A 20 Hz-es térbeli törlés (clearing) nélkül a mozgó tárgyak nyomai a rácson maradnak, és a robot virtuális fantomfalakkal rekeszti be magát.
-  - *CPU-torlódás poligon-ütközéskor:* A másodpercenként 200+ szimulált trajektória és a robot valós, aszimmetrikus körvonalának (footprint) folyamatos metszetszámítása naiv kóddal túlterheli a processzort és vezérlési késést okoz.
-  - *Aszinkron TF-sodródás:* Időszinkronizált pufferezés nélkül a folyamatosan korrigáló SLAM-pozícióbecslés miatt a vezérlő 20–50 ms-mal korábbi, múltbeli koordinátákra küld motorparancsot, ami szűk helyen falnak ütközést okoz.
-  - *Kinematikai vakfoltok:* Kész vezérlők (pl. DWB) nélkül a robot nem tud dinamikusan elhajolni a váratlan akadályok mellett, a gyorsulási korlátok hiánya pedig túllendülést (overshoot) és a SLAM pozícióvesztését eredményezi.
-  - *Holtpontok (Deadlock):* Az egyszerű `if/else` logika zsákutcában végleg leáll, míg a Nav2 viselkedésfái (`bt_navigator`) determinisztikusan indítják a hibaelhárító manővereket.
-- **Dinamikus gördülő költségtérkép:** Statikus térkép helyett egy a robot (`body_center`) körül mozgó, $40\times40$ méteres `rolling_window` ablakot használunk. Az akadályok körüli veszélyességi grádiens lecsengése: $C = \exp(-\text{cost\_scaling\_factor} \times \text{distance})$.
-- **Kiértékelő-csonkítás (Critic lobotomy):** A robot oldalazása és tolatása tiltott (`min_vel_x: 0.0`, `max_vel_y: 0.0`). Mivel a mozgáskorlátok miatt az orientációs kiértékelők (`GoalAlign`, `PathAlign`) folyamatosan harcolnának a távolsági kiértékelőkkel, a heves helyben pörgés megelőzésére ezeket töröltük; a robot kizárólag az $X,Y$ távolság minimalizálása alapján halad.
-- **Helyreállító lánc (Recovery):** Ha a DWB nem talál érvényes utat, a vezérlés a `behavior_server`-re száll: 90°-os forgás (`spin` a térképfrissítéshez) $\rightarrow$ 5 s várakozás $\rightarrow$ vak tolatás (`backup`).
+### 8. Nav2: Kizárólag SLAM-alapú navigáció és lokális útvonaltervezés
+Mivel a rendszer előre mentett statikus térkép nélkül dolgozik, a Nav2 stack dinamikus, gördülőablakos módon és egyszerűsített kinematikával működik.
+
+**Egyedi útvonaltervezés nehézsége:** Egy natív szkript (pl. A* + Pure Pursuit) valós 3D LiDAR-os környezetben történő futtatásához az alábbi további infrastruktúra kell:
+
+  - **Aszinkron szálkezelés:** A CPU-igényes globális A* útvonalkeresés (1–2 Hz) nem blokkolhatja a motorokat vezérlő, gyors lokális hurkot (20 Hz).
+  - **Valós idejű poligon-ütközésvizsgálat:** A pontos footprint metszetszámítását a térképpel optimalizált alacsony szintű kód nélkül túlterheli a processzort.
+  - **3D sugárkövetés (Raycasting):** A `VoxelLayer` 20 Hz-es térbeli törlése nélkül a mozgó dinamikus tárgyak nyomai a rácson maradnak, 'fantomfalakat' hagy.
+  - **Aszinkron TF-sodródás korrekciója:** A folyamatosan ugráló SLAM-pozícióbecslés miatt időszinkronizált pufferezésre és geometriai extrapolációra van szükség, különben a vezérlő 20–50 ms-mal korábbi, múltbeli koordináták alapján küld motorparancsot.
+  - **Reaktív hibaelhárítás (Deadlock):** Az `if/else` logika a hibánál végleg leáll. A Nav2 viselkedésfát (`bt_navigator`) használ, determinisztikus állapotokkal indítja a hibakezeléseket (helyben forgás, vak tolatás).
+
+**Kettős gördülő costmap:** Statikus térkép hiányában mindkét réteg a robot (`body_center`) körül mozgó `rolling_window: true` módban, más frekvencával működik:
+  - *Globális cosmap ($40\times40\text{ m}$, 1–2 Hz):* Rövid távú térbeli memória. A nagy méret a zsákutcák elkerülése miatt kell.
+  - *Lokális costmap ($3\times3\text{ m}$, 20 Hz):* Ütközéselkerülésért felel. A közvetlen környezetet dolgozza fel, hogy a dinamikusan belépő akadályokra reagáljon.
+  - *Veszélyességi gradiens:* Az `inflation_layer` az akadályok köré exponenciális lecsengést számol: $C = \exp(-\text{cost\_scaling\_factor} \times \text{distance})$.
+
+**Kiértékelő egyszerűsítése:** A robot oldalazása és tolatása tiltott. Mivel a mozgáskorlátok miatt az orientációs kiértékelők (`GoalAlign`, `PathAlign`) folyamatosan harcolnának a távolsági kiértékelőkkel, ezért nincsenek használva. A DWB (Dynamic Window Approach) vezérlő trajektóriáit egy egyszerűsített costmap értékeli ki:
+  $$C_{\text{total}} = w_{\text{path}} \cdot \text{PathDist} + w_{\text{goal}} \cdot \text{GoalDist} + w_{\text{obs}} \cdot \text{ObstacleCost}$$
+
+**Helyreállító lánc (Recovery):** Ha a DWB nem talál érvényes utat a lokális térképen, a vezérlés a `behavior_server`-re száll: 90°-os forgás (`spin` a térképfrissítéshez) $\rightarrow$ 5 s várakozás $\rightarrow$ vak tolatás (`backup`), végül a globális útvonal újratervezése.
 
 ### 9. Illesztés
 A SLAM trajektória publikálása, opcionálisan az OptiTrack mocap adatok beolvasása és publikálása, a mocap adatok illesztése a SLAM koordináta-rendszerbe, mindkettő naplózása.
@@ -106,12 +123,22 @@ A SLAM trajektória publikálása, opcionálisan az OptiTrack mocap adatok beolv
   - A vezérlőparancsokat a rendszer a `SportClient.Move(vx, vy, yaw_rate)` függvényen keresztül továbbítja 20 Hz-en.
   - Watchdog: leállítja a mozgást, ha 0,5 másodpercen belül nem érkezik új vezérlési parancs.
 
+### 11. Korlátok
+- **Alapvető modulok hiánya:** A Point-LIO köré a nulláról kell felépíteni az alábbiakat:
+  - Pontonkénti időbélyegek (per-point timestamps) 
+  - Szenzorkalibráció és előjelváltás
+  - Vizualizációs eszköz
+  - Navigációs stack
+  - Nincs statikus térkép (`.pcd` mentés és betöltés), helyette gördülőablakos lokális költségtérkép
+  - Kommunikációs csatornák és ahhoz egy protokoll kialakítása
+- **SLAM-stabilitásvesztés a vezérlési hurokban:** Az IKFoM könnyen elveszíti a konvergenciát a zárt láncú navigáció során. Amikor a Nav2 lokális tervezője (DWB) nem talál érvényes utat és elkezd hibaelhárítani, a SLAM odometria nem tudja lekövetni.
+- **A Nav2 paraméterezése:** Ez egy kiterjesztett navigációs rendszer, ahhoz, hogy a kutyára lehessen szabni, el kéne mélyedni a működésében/felépítésében.
+- **Kezdeti feltételek:** Minden indításnál új térkép keletkezik, így alapértelmetett pózból kell indítani a térképezést.
+
 ---
 
-## Topic adatfolyam-diagram
-
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph RawSensors[Nyers szenzorok]
     UL[Unilidar / Livox driver]
   end
